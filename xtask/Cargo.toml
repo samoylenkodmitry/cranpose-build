@@ -1,0 +1,12 @@
+[package]
+name = "cranpose-build-xtask"
+version = "0.1.0"
+edition = "2024"
+publish = false
+[dependencies]
+anyhow = "1"
+cranpose-build = { path = ".." }
+[lints.rust]
+unsafe_code = "forbid"
+[lints.clippy]
+unwrap_used = "deny"

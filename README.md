@@ -68,6 +68,10 @@ PKG_CONFIG_SYSROOT_DIR = "/opt/my-linux-sysroot"
 directory = "android"
 module = "app"
 
+# Pass existing Gradle project properties without modifying build scripts.
+[android.properties]
+showcaseAbi = "arm64-v8a"
+
 [ios]
 plist = "ios/Info.plist"
 resources = ["ios/AppIcon.png"]
@@ -89,6 +93,10 @@ configuration are unchanged. No hot-reload instrumentation is injected.
 Outputs are isolated beneath `dist/cranpose/<platform>/<profile>`, including the
 application, ZIP, SHA256 and `artifact.json`. Use `--target-dir` for Cargo caches
 and `--output-dir` for packages. Failures do not publish successful artifacts.
+The build directory is portable: copy it to the matching OS and run
+`cranpose-build launch --artifact /path/to/build-directory/artifact.json`.
+Manifest paths are relative to that directory; moving a package does not require
+the original developer's checkout or home directory.
 
 `--json` provides typed events for IDE integration. The Rust library exposes the
 same planner, build, launch, doctor and cancellation APIs. Ctrl+C stops the owned
@@ -106,6 +114,9 @@ Tests compile/run a fixture, inspect packages, handle paths with spaces, preserv
 Cargo configuration and reject failed builds, invalid configuration and bad
 checksums. The template SDK tests streaming, cancellation and descendant exit on
 three desktop OSes. Compilation alone does not establish GUI/runtime support.
+
+The Android package identifier is read from Gradle's output metadata. Its signing
+configuration and available ABIs remain those of the Android project.
 
 ## Credits
 

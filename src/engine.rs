@@ -28,6 +28,42 @@ pub struct Artifact {
     pub sha256: String,
     pub archive: PathBuf,
 }
+impl Artifact {
+    /// Read a portable artifact manifest beside its application directory.
+    pub fn load(path: &Path) -> Result<Self> {
+        let mut artifact: Self = serde_json::from_slice(&fs::read(path)?)?;
+        let root = path
+            .canonicalize()?
+            .parent()
+            .context("Artifact directory")?
+            .to_owned();
+        let resolve = |path: &Path| -> Result<PathBuf> {
+            ensure!(
+                !path.as_os_str().is_empty()
+                    && path
+                        .components()
+                        .all(|c| matches!(c, std::path::Component::Normal(_))),
+                "Artifact paths must stay inside their directory"
+            );
+            Ok(root.join(path))
+        };
+        artifact.path = resolve(&artifact.path)?;
+        artifact.archive = resolve(&artifact.archive)?;
+        artifact.executable = artifact.executable.as_deref().map(resolve).transpose()?;
+        Ok(artifact)
+    }
+    fn portable(&self, root: &Path) -> Result<Self> {
+        let mut artifact = self.clone();
+        artifact.path = self.path.strip_prefix(root)?.to_owned();
+        artifact.archive = self.archive.strip_prefix(root)?.to_owned();
+        artifact.executable = self
+            .executable
+            .as_deref()
+            .map(|p| p.strip_prefix(root).map(Path::to_owned))
+            .transpose()?;
+        Ok(artifact)
+    }
+}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Plan {
     pub platform: Platform,
@@ -89,6 +125,16 @@ fn make_plan(project: &Project, request: &Request) -> Result<Plan> {
         ];
         if request.offline {
             arguments.push("--offline".into());
+        }
+        for (key, value) in &project.config.android.properties {
+            ensure!(
+                !key.is_empty()
+                    && key
+                        .chars()
+                        .all(|c| c.is_ascii_alphanumeric() || "_.-".contains(c)),
+                "Invalid Gradle property name"
+            );
+            arguments.push(format!("-P{key}={value}"));
         }
         return Ok(Plan {
             platform: request.platform,
@@ -188,6 +234,9 @@ pub fn build(
         .current_dir(&plan.directory)
         .envs(&plan.environment);
     tools::apply_environment(&mut command)?;
+    if request.offline {
+        command.env("CARGO_NET_OFFLINE", "true");
+    }
     emit(Event::Stage {
         message: format!("Building {} with {}", request.platform.name(), plan.backend),
     });
@@ -210,13 +259,17 @@ pub fn build(
         platform: request.platform,
         path,
         executable,
-        identifier: project.identifier()?,
+        identifier: if request.platform == Platform::Android {
+            android_identifier(&plan, &project, request)?
+        } else {
+            project.identifier()?
+        },
         archive,
         sha256,
     };
     fs::write(
         staging.path().join("artifact.json"),
-        serde_json::to_vec_pretty(&artifact)?,
+        serde_json::to_vec_pretty(&artifact.portable(staging.path())?)?,
     )?;
     let _ = staging.keep();
     emit(Event::Artifact {
@@ -351,6 +404,27 @@ fn package(
         }
     }
     Ok((path, Some(executable)))
+}
+
+fn android_identifier(plan: &Plan, project: &Project, request: &Request) -> Result<String> {
+    let root = plan
+        .directory
+        .join(project.config.android.module.replace(':', "/"))
+        .join("build/outputs/apk")
+        .join(request.profile());
+    let metadata: serde_json::Value =
+        serde_json::from_slice(&fs::read(root.join("output-metadata.json"))?)?;
+    let id = metadata["applicationId"]
+        .as_str()
+        .context("Android output metadata has no applicationId")?;
+    ensure!(
+        !id.is_empty()
+            && id
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || "._".contains(c)),
+        "Invalid APK application ID"
+    );
+    Ok(id.into())
 }
 
 fn write_plist(
@@ -513,6 +587,9 @@ pub fn run(
 ) -> Result<()> {
     let host = Host::default();
     let mut commands = Vec::new();
+    emit(Event::Stage {
+        message: "Launching application".into(),
+    });
     if artifact.platform.simulator() {
         ensure!(host.os == "macos", "iOS simulators run on macOS");
         let device = device
@@ -545,6 +622,14 @@ pub fn run(
         ]);
         commands.push(launch);
     } else if artifact.platform == Platform::Android {
+        ensure!(
+            !artifact.identifier.is_empty()
+                && artifact
+                    .identifier
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || "._".contains(c)),
+            "Invalid Android application ID"
+        );
         let device = device.context(
             "Select an Android device with --device <serial>; use devices --platform android",
         )?;
@@ -552,20 +637,35 @@ pub fn run(
         install
             .args(["-s", device, "install", "-r"])
             .arg(&artifact.path);
-        commands.push(install);
-        let mut launch = Command::new(tools::tool("adb")?);
-        launch.args([
+        process::execute(install, Duration::from_secs(300), cancel, |text| {
+            emit(Event::Log { text: text.into() })
+        })?;
+        let mut resolve = Command::new(tools::tool("adb")?);
+        resolve.args([
             "-s",
             device,
             "shell",
-            "monkey",
-            "-p",
-            &artifact.identifier,
+            "cmd",
+            "package",
+            "resolve-activity",
+            "--brief",
+            "-a",
+            "android.intent.action.MAIN",
             "-c",
             "android.intent.category.LAUNCHER",
-            "1",
+            &artifact.identifier,
         ]);
-        commands.push(launch);
+        let activity = android_activity(&process::capture(resolve, cancel)?, &artifact.identifier)?;
+        let mut launch = Command::new(tools::tool("adb")?);
+        launch.args(["-s", device, "shell", "am", "start", "-W", "-n", &activity]);
+        let output = process::capture(launch, cancel)?;
+        emit(Event::Log {
+            text: output.clone(),
+        });
+        ensure!(
+            output.lines().any(|line| line.trim() == "Status: ok"),
+            "Android did not confirm launch: {output}"
+        );
     } else {
         ensure!(
             artifact.platform.os() == host.os,
@@ -585,7 +685,34 @@ pub fn run(
             emit(Event::Log { text: text.into() })
         })?;
     }
+    emit(Event::Stage {
+        message: if matches!(artifact.platform.os(), "ios" | "android") {
+            "Application launched"
+        } else {
+            "Application exited"
+        }
+        .into(),
+    });
     Ok(())
+}
+
+pub fn android_activity(output: &str, identifier: &str) -> Result<String> {
+    let prefix = format!("{identifier}/");
+    let components: Vec<_> = output
+        .lines()
+        .map(str::trim)
+        .filter(|line| {
+            line.starts_with(&prefix)
+                && line
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || "._/$".contains(c))
+        })
+        .collect();
+    ensure!(
+        components.len() == 1,
+        "Cannot resolve a unique Android launcher activity for {identifier}: {output}"
+    );
+    Ok(components[0].into())
 }
 
 pub fn devices(platform: Platform, cancel: &Cancellation) -> Result<String> {

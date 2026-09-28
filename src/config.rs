@@ -36,14 +36,14 @@ pub struct Target {
 pub struct Android {
     pub directory: PathBuf,
     pub module: String,
-    pub activity: String,
+    pub properties: BTreeMap<String, String>,
 }
 impl Default for Android {
     fn default() -> Self {
         Self {
             directory: "android".into(),
             module: "app".into(),
-            activity: String::new(),
+            properties: BTreeMap::new(),
         }
     }
 }
@@ -99,6 +99,8 @@ impl Config {
 pub struct Request {
     pub manifest: PathBuf,
     pub package: Option<String>,
+    #[serde(default)]
+    pub binary: Option<String>,
     pub platform: Platform,
     pub release: bool,
     pub offline: bool,
@@ -112,6 +114,7 @@ impl Request {
             manifest: manifest.into(),
             platform,
             package: None,
+            binary: None,
             release: false,
             offline: false,
             target_dir: None,

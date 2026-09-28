@@ -51,6 +51,8 @@ struct BuildArgs {
     #[arg(long)]
     package: Option<String>,
     #[arg(long)]
+    bin: Option<String>,
+    #[arg(long)]
     platform: Option<Platform>,
     #[arg(long)]
     release: bool,
@@ -68,6 +70,7 @@ impl From<BuildArgs> for Request {
         Self {
             manifest: a.manifest_path,
             package: a.package,
+            binary: a.bin,
             platform: a.platform.unwrap_or_else(|| Host::default().native()),
             release: a.release,
             offline: a.offline,
@@ -173,7 +176,7 @@ fn execute(cli: Cli, cancel: &Cancellation) -> Result<()> {
         }
         Action::Devices { platform } => println!("{}", engine::devices(platform, cancel)?),
         Action::Launch { artifact, device } => {
-            let artifact = serde_json::from_slice(&std::fs::read(artifact)?)?;
+            let artifact = engine::Artifact::load(&artifact)?;
             engine::run(&artifact, device.as_deref(), cancel, |event| {
                 emit(cli.json, event)
             })?;

@@ -32,6 +32,14 @@ static, notarized or store-ready.
 
 ## Install and setup
 
+Download the ZIP for your OS and architecture from
+[Releases](https://github.com/samoylenkodmitry/cranpose-build/releases/latest),
+verify its accompanying SHA256, and extract `cranpose-build` (`.exe` on Windows).
+Prebuilt downloads cover ARM64 and x86-64 macOS, Linux and Windows and do not
+require Git. Put the executable on PATH or invoke it by its full path.
+
+Alternatively, install from source with Cargo:
+
 ```console
 cargo install --locked --git https://github.com/samoylenkodmitry/cranpose-build
 ```

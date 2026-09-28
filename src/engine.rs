@@ -551,6 +551,9 @@ pub fn run(
 ) -> Result<()> {
     let host = Host::default();
     let mut commands = Vec::new();
+    emit(Event::Stage {
+        message: "Launching application".into(),
+    });
     if artifact.platform.simulator() {
         ensure!(host.os == "macos", "iOS simulators run on macOS");
         let device = device
@@ -598,20 +601,35 @@ pub fn run(
         install
             .args(["-s", device, "install", "-r"])
             .arg(&artifact.path);
-        commands.push(install);
-        let mut launch = Command::new(tools::tool("adb")?);
-        launch.args([
+        process::execute(install, Duration::from_secs(300), cancel, |text| {
+            emit(Event::Log { text: text.into() })
+        })?;
+        let mut resolve = Command::new(tools::tool("adb")?);
+        resolve.args([
             "-s",
             device,
             "shell",
-            "monkey",
-            "-p",
-            &artifact.identifier,
+            "cmd",
+            "package",
+            "resolve-activity",
+            "--brief",
+            "-a",
+            "android.intent.action.MAIN",
             "-c",
             "android.intent.category.LAUNCHER",
-            "1",
+            &artifact.identifier,
         ]);
-        commands.push(launch);
+        let activity = android_activity(&process::capture(resolve, cancel)?, &artifact.identifier)?;
+        let mut launch = Command::new(tools::tool("adb")?);
+        launch.args(["-s", device, "shell", "am", "start", "-W", "-n", &activity]);
+        let output = process::capture(launch, cancel)?;
+        emit(Event::Log {
+            text: output.clone(),
+        });
+        ensure!(
+            output.lines().any(|line| line.trim() == "Status: ok"),
+            "Android did not confirm launch: {output}"
+        );
     } else {
         ensure!(
             artifact.platform.os() == host.os,
@@ -631,7 +649,34 @@ pub fn run(
             emit(Event::Log { text: text.into() })
         })?;
     }
+    emit(Event::Stage {
+        message: if matches!(artifact.platform.os(), "ios" | "android") {
+            "Application launched"
+        } else {
+            "Application exited"
+        }
+        .into(),
+    });
     Ok(())
+}
+
+pub fn android_activity(output: &str, identifier: &str) -> Result<String> {
+    let prefix = format!("{identifier}/");
+    let components: Vec<_> = output
+        .lines()
+        .map(str::trim)
+        .filter(|line| {
+            line.starts_with(&prefix)
+                && line
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || "._/$".contains(c))
+        })
+        .collect();
+    ensure!(
+        components.len() == 1,
+        "Cannot resolve a unique Android launcher activity for {identifier}: {output}"
+    );
+    Ok(components[0].into())
 }
 
 pub fn devices(platform: Platform, cancel: &Cancellation) -> Result<String> {

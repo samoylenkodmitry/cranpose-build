@@ -587,6 +587,7 @@ pub fn run(
 ) -> Result<()> {
     let host = Host::default();
     let mut commands = Vec::new();
+    let desktop = !matches!(artifact.platform.os(), "ios" | "android");
     emit(Event::Stage {
         message: "Launching application".into(),
     });
@@ -681,9 +682,18 @@ pub fn run(
         commands.push(command);
     }
     for command in commands {
-        process::execute(command, Duration::from_secs(86400), cancel, |text| {
-            emit(Event::Log { text: text.into() })
-        })?;
+        process::execute_observed(
+            command,
+            Duration::from_secs(86400),
+            cancel,
+            |event| match event {
+                process::ExecutionEvent::Started { .. } if desktop => emit(Event::Stage {
+                    message: "Application running".into(),
+                }),
+                process::ExecutionEvent::Started { .. } => {}
+                process::ExecutionEvent::Output { text } => emit(Event::Log { text: text.into() }),
+            },
+        )?;
     }
     emit(Event::Stage {
         message: if matches!(artifact.platform.os(), "ios" | "android") {

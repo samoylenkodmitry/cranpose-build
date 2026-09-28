@@ -303,7 +303,7 @@ dependencies = [
 
 [[package]]
 name = "cranpose-build"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "anyhow",
  "cargo_metadata",
@@ -331,7 +331,7 @@ dependencies = [
 [[package]]
 name = "cranpose-plugin-process"
 version = "0.1.0"
-source = "git+https://github.com/samoylenkodmitry/cranpose-intellij-plugin-template?rev=81ebec6dce2d0261516b4c7448610457213488e2#81ebec6dce2d0261516b4c7448610457213488e2"
+source = "git+https://github.com/samoylenkodmitry/cranpose-intellij-plugin-template?rev=5e0b8b8e514af83906e18b6c42c033eca3837589#5e0b8b8e514af83906e18b6c42c033eca3837589"
 dependencies = [
  "anyhow",
  "libproc",

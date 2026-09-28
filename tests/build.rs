@@ -76,16 +76,91 @@ fn build_package_and_launch_from_paths_with_spaces() -> Result<()> {
     let relocated = engine::Artifact::load(&moved.join("artifact.json"))?;
     assert_eq!(relocated.sha256, engine::hash(&relocated.archive)?);
     let mut output = String::new();
+    let mut stages = Vec::new();
     engine::run(&relocated, None, &cancel, |e| {
+        if let engine::Event::Stage { ref message } = e {
+            stages.push(message.clone());
+        }
         if let engine::Event::Log { text } = e {
+            assert_eq!(
+                stages.last().map(String::as_str),
+                Some("Application running")
+            );
             output.push_str(&text);
         }
     })?;
     assert!(output.contains("fixture launched"));
+    assert_eq!(
+        stages,
+        [
+            "Launching application",
+            "Application running",
+            "Application exited"
+        ]
+    );
     let mut invalid = serde_json::to_value(&metadata)?;
     invalid["executable"] = serde_json::json!("../outside");
     fs::write(moved.join("invalid.json"), serde_json::to_vec(&invalid)?)?;
     assert!(engine::Artifact::load(&moved.join("invalid.json")).is_err());
+    Ok(())
+}
+
+#[test]
+fn desktop_running_stage_precedes_exit_and_stop_but_never_failed_spawn() -> Result<()> {
+    let root = fixture()?;
+    fs::write(
+        root.path().join("src/main.rs"),
+        r#"
+fn main() {
+    if std::path::Path::new("fail").exists() { std::process::exit(23); }
+    while std::path::Path::new("hold").exists() {
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}
+"#,
+    )?;
+    let artifact = engine::build(
+        &Request::new(root.path().join("Cargo.toml"), Host::default().native()),
+        &Cancellation::default(),
+        |_| {},
+    )?;
+    let executable = artifact.executable.as_ref().expect("executable");
+    let directory = executable.parent().expect("directory");
+    for stop in [false, true] {
+        let marker = directory.join(if stop { "hold" } else { "fail" });
+        fs::write(&marker, "")?;
+        let cancel = Cancellation::default();
+        let mut stages = Vec::new();
+        let result = engine::run(&artifact, None, &cancel, |event| {
+            if let engine::Event::Stage { message } = event {
+                if stop && message == "Application running" {
+                    cancel.cancel();
+                }
+                stages.push(message);
+            }
+        });
+        assert!(result.is_err());
+        assert_eq!(stages, ["Launching application", "Application running"]);
+        fs::remove_file(marker)?;
+    }
+    for pre_cancel in [true, false] {
+        let cancel = Cancellation::default();
+        if pre_cancel {
+            cancel.cancel();
+        } else {
+            fs::remove_file(executable)?;
+        }
+        let mut stages = Vec::new();
+        assert!(
+            engine::run(&artifact, None, &cancel, |event| {
+                if let engine::Event::Stage { message } = event {
+                    stages.push(message);
+                }
+            })
+            .is_err()
+        );
+        assert_eq!(stages, ["Launching application"]);
+    }
     Ok(())
 }
 

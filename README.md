@@ -110,6 +110,12 @@ the original developer's checkout or home directory.
 same planner, build, launch, doctor and cancellation APIs. Ctrl+C stops the owned
 subprocess tree using the same Rust process SDK as Cranpose Studio.
 
+Desktop launch reports `Application running` after successful OS process creation,
+then `Application exited` after a successful exit. A failed spawn never reports
+running. This status does not promise a rendered frame or application readiness.
+Mobile tools retain `Application launched` after their successful device handoff;
+their launcher process is not the application process.
+
 ## Development
 
 ```console

@@ -50,6 +50,15 @@ fn build_package_and_launch_from_paths_with_spaces() -> Result<()> {
             .join("artifact.json"),
     )?)?;
     assert_eq!(metadata.sha256, artifact.sha256);
+    assert!(!metadata.path.is_absolute());
+    let resolved = engine::Artifact::load(
+        &artifact
+            .archive
+            .parent()
+            .expect("artifact directory")
+            .join("artifact.json"),
+    )?;
+    assert_eq!(resolved.path.canonicalize()?, artifact.path.canonicalize()?);
     if cfg!(target_os = "macos") {
         let plist = plist::Value::from_file(artifact.path.join("Contents/Info.plist"))?;
         assert_eq!(
@@ -57,14 +66,26 @@ fn build_package_and_launch_from_paths_with_spaces() -> Result<()> {
             Some("Fixture & Test")
         );
     }
+    assert!(zip.by_index(0)?.size() > 0);
+    drop(zip);
+    let moved = root.path().join("moved package");
+    fs::rename(
+        artifact.archive.parent().expect("package directory"),
+        &moved,
+    )?;
+    let relocated = engine::Artifact::load(&moved.join("artifact.json"))?;
+    assert_eq!(relocated.sha256, engine::hash(&relocated.archive)?);
     let mut output = String::new();
-    engine::run(&artifact, None, &cancel, |e| {
+    engine::run(&relocated, None, &cancel, |e| {
         if let engine::Event::Log { text } = e {
             output.push_str(&text);
         }
     })?;
     assert!(output.contains("fixture launched"));
-    assert!(zip.by_index(0)?.size() > 0);
+    let mut invalid = serde_json::to_value(&metadata)?;
+    invalid["executable"] = serde_json::json!("../outside");
+    fs::write(moved.join("invalid.json"), serde_json::to_vec(&invalid)?)?;
+    assert!(engine::Artifact::load(&moved.join("invalid.json")).is_err());
     Ok(())
 }
 

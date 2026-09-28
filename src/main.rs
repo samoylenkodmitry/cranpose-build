@@ -176,7 +176,7 @@ fn execute(cli: Cli, cancel: &Cancellation) -> Result<()> {
         }
         Action::Devices { platform } => println!("{}", engine::devices(platform, cancel)?),
         Action::Launch { artifact, device } => {
-            let artifact = serde_json::from_slice(&std::fs::read(artifact)?)?;
+            let artifact = engine::Artifact::load(&artifact)?;
             engine::run(&artifact, device.as_deref(), cancel, |event| {
                 emit(cli.json, event)
             })?;

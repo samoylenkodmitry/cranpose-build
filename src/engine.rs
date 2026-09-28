@@ -28,6 +28,42 @@ pub struct Artifact {
     pub sha256: String,
     pub archive: PathBuf,
 }
+impl Artifact {
+    /// Read a portable artifact manifest beside its application directory.
+    pub fn load(path: &Path) -> Result<Self> {
+        let mut artifact: Self = serde_json::from_slice(&fs::read(path)?)?;
+        let root = path
+            .canonicalize()?
+            .parent()
+            .context("Artifact directory")?
+            .to_owned();
+        let resolve = |path: &Path| -> Result<PathBuf> {
+            ensure!(
+                !path.as_os_str().is_empty()
+                    && path
+                        .components()
+                        .all(|c| matches!(c, std::path::Component::Normal(_))),
+                "Artifact paths must stay inside their directory"
+            );
+            Ok(root.join(path))
+        };
+        artifact.path = resolve(&artifact.path)?;
+        artifact.archive = resolve(&artifact.archive)?;
+        artifact.executable = artifact.executable.as_deref().map(resolve).transpose()?;
+        Ok(artifact)
+    }
+    fn portable(&self, root: &Path) -> Result<Self> {
+        let mut artifact = self.clone();
+        artifact.path = self.path.strip_prefix(root)?.to_owned();
+        artifact.archive = self.archive.strip_prefix(root)?.to_owned();
+        artifact.executable = self
+            .executable
+            .as_deref()
+            .map(|p| p.strip_prefix(root).map(Path::to_owned))
+            .transpose()?;
+        Ok(artifact)
+    }
+}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Plan {
     pub platform: Platform,
@@ -233,7 +269,7 @@ pub fn build(
     };
     fs::write(
         staging.path().join("artifact.json"),
-        serde_json::to_vec_pretty(&artifact)?,
+        serde_json::to_vec_pretty(&artifact.portable(staging.path())?)?,
     )?;
     let _ = staging.keep();
     emit(Event::Artifact {

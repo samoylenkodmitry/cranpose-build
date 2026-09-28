@@ -93,6 +93,10 @@ configuration are unchanged. No hot-reload instrumentation is injected.
 Outputs are isolated beneath `dist/cranpose/<platform>/<profile>`, including the
 application, ZIP, SHA256 and `artifact.json`. Use `--target-dir` for Cargo caches
 and `--output-dir` for packages. Failures do not publish successful artifacts.
+The build directory is portable: copy it to the matching OS and run
+`cranpose-build launch --artifact /path/to/build-directory/artifact.json`.
+Manifest paths are relative to that directory; moving a package does not require
+the original developer's checkout or home directory.
 
 `--json` provides typed events for IDE integration. The Rust library exposes the
 same planner, build, launch, doctor and cancellation APIs. Ctrl+C stops the owned

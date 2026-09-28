@@ -36,14 +36,14 @@ pub struct Target {
 pub struct Android {
     pub directory: PathBuf,
     pub module: String,
-    pub activity: String,
+    pub properties: BTreeMap<String, String>,
 }
 impl Default for Android {
     fn default() -> Self {
         Self {
             directory: "android".into(),
             module: "app".into(),
-            activity: String::new(),
+            properties: BTreeMap::new(),
         }
     }
 }

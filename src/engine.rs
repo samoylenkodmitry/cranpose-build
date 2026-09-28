@@ -90,6 +90,16 @@ fn make_plan(project: &Project, request: &Request) -> Result<Plan> {
         if request.offline {
             arguments.push("--offline".into());
         }
+        for (key, value) in &project.config.android.properties {
+            ensure!(
+                !key.is_empty()
+                    && key
+                        .chars()
+                        .all(|c| c.is_ascii_alphanumeric() || "_.-".contains(c)),
+                "Invalid Gradle property name"
+            );
+            arguments.push(format!("-P{key}={value}"));
+        }
         return Ok(Plan {
             platform: request.platform,
             backend: backend.into(),
@@ -188,6 +198,9 @@ pub fn build(
         .current_dir(&plan.directory)
         .envs(&plan.environment);
     tools::apply_environment(&mut command)?;
+    if request.offline {
+        command.env("CARGO_NET_OFFLINE", "true");
+    }
     emit(Event::Stage {
         message: format!("Building {} with {}", request.platform.name(), plan.backend),
     });
@@ -210,7 +223,11 @@ pub fn build(
         platform: request.platform,
         path,
         executable,
-        identifier: project.identifier()?,
+        identifier: if request.platform == Platform::Android {
+            android_identifier(&plan, &project, request)?
+        } else {
+            project.identifier()?
+        },
         archive,
         sha256,
     };
@@ -351,6 +368,27 @@ fn package(
         }
     }
     Ok((path, Some(executable)))
+}
+
+fn android_identifier(plan: &Plan, project: &Project, request: &Request) -> Result<String> {
+    let root = plan
+        .directory
+        .join(project.config.android.module.replace(':', "/"))
+        .join("build/outputs/apk")
+        .join(request.profile());
+    let metadata: serde_json::Value =
+        serde_json::from_slice(&fs::read(root.join("output-metadata.json"))?)?;
+    let id = metadata["applicationId"]
+        .as_str()
+        .context("Android output metadata has no applicationId")?;
+    ensure!(
+        !id.is_empty()
+            && id
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || "._".contains(c)),
+        "Invalid APK application ID"
+    );
+    Ok(id.into())
 }
 
 fn write_plist(
@@ -545,6 +583,14 @@ pub fn run(
         ]);
         commands.push(launch);
     } else if artifact.platform == Platform::Android {
+        ensure!(
+            !artifact.identifier.is_empty()
+                && artifact
+                    .identifier
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || "._".contains(c)),
+            "Invalid Android application ID"
+        );
         let device = device.context(
             "Select an Android device with --device <serial>; use devices --platform android",
         )?;

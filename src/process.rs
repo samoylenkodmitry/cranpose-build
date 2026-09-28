@@ -1,6 +1,6 @@
 //! The same process ownership used by the IDE, with a small text-capture helper.
 use anyhow::{Context, Result, bail};
-pub use cranpose_plugin_process::{Cancellation, execute};
+pub use cranpose_plugin_process::{Cancellation, ExecutionEvent, execute, execute_observed};
 use std::{process::Command, time::Duration};
 
 pub fn capture(command: Command, cancel: &Cancellation) -> Result<String> {

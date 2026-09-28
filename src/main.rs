@@ -51,6 +51,8 @@ struct BuildArgs {
     #[arg(long)]
     package: Option<String>,
     #[arg(long)]
+    bin: Option<String>,
+    #[arg(long)]
     platform: Option<Platform>,
     #[arg(long)]
     release: bool,
@@ -68,6 +70,7 @@ impl From<BuildArgs> for Request {
         Self {
             manifest: a.manifest_path,
             package: a.package,
+            binary: a.bin,
             platform: a.platform.unwrap_or_else(|| Host::default().native()),
             release: a.release,
             offline: a.offline,

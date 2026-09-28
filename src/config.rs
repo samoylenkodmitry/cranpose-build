@@ -99,6 +99,8 @@ impl Config {
 pub struct Request {
     pub manifest: PathBuf,
     pub package: Option<String>,
+    #[serde(default)]
+    pub binary: Option<String>,
     pub platform: Platform,
     pub release: bool,
     pub offline: bool,
@@ -112,6 +114,7 @@ impl Request {
             manifest: manifest.into(),
             platform,
             package: None,
+            binary: None,
             release: false,
             offline: false,
             target_dir: None,

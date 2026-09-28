@@ -78,7 +78,7 @@ impl Project {
     pub fn binary(&self, request: &Request) -> Result<String> {
         let target = self.config.target(request.platform);
         let binaries: Vec<_> = self.package.targets.iter().filter(|t| t.is_bin()).collect();
-        if let Some(name) = target.bin {
+        if let Some(name) = request.binary.clone().or(target.bin) {
             ensure!(
                 binaries.iter().any(|t| t.name == name),
                 "Unknown binary {name}"

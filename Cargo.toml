@@ -1,6 +1,6 @@
 [package]
 name = "cranpose-build"
-version = "0.1.6"
+version = "0.1.7"
 edition = "2024"
 license = "Apache-2.0"
 description = "Build, package and run Cranpose apps across desktop and mobile platforms"
@@ -23,7 +23,7 @@ sha2 = "0.10"
 tempfile = "3"
 ctrlc = "3"
 ureq = { version = "3.4", features = ["json"] }
-cranpose-plugin-process = { git = "https://github.com/samoylenkodmitry/cranpose-intellij-plugin-template", rev = "1a7f815d363456b6da19248f2e6213b14d859bd7" }
+cranpose-plugin-process = { git = "https://github.com/samoylenkodmitry/cranpose-intellij-plugin-template", rev = "52ea443e8992b7346b993209027b98e606eb8329" }
 
 [lints.rust]
 unsafe_code = "forbid"

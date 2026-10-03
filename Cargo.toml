@@ -23,7 +23,7 @@ sha2 = "0.10"
 tempfile = "3"
 ctrlc = "3"
 ureq = { version = "3.4", features = ["json"] }
-cranpose-plugin-process = { git = "https://github.com/samoylenkodmitry/cranpose-intellij-plugin-template", rev = "15cb6586aef5f4d8a97d358fd72703f72c4cf8ff", version = "0.8.2" }
+cranpose-plugin-process = { git = "https://github.com/samoylenkodmitry/cranpose-intellij-plugin-template", rev = "3aadbb2bfb6018695b4a12ca798a37b5ae461e7f", version = "0.8.2" }
 
 [lints.rust]
 unsafe_code = "forbid"

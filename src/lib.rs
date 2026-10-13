@@ -7,6 +7,7 @@ pub mod platform;
 pub mod process;
 pub mod project;
 pub mod tools;
+pub mod web;
 
 pub use config::{Config, Request};
 pub use engine::{Artifact, Event, build, plan, run};

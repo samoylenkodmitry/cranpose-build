@@ -173,6 +173,9 @@ fn make_plan(project: &Project, request: &Request) -> Result<Plan> {
             ],
         });
     }
+    if request.platform == Platform::Web {
+        return Ok(web_plan(project, request, target, output_directory));
+    }
     let binary = project.binary(request)?;
     let mut arguments = match backend {
         "cargo-xwin" => vec!["xwin".into(), "build".into()],
@@ -239,6 +242,158 @@ fn make_plan(project: &Project, request: &Request) -> Result<Plan> {
     })
 }
 
+/// The web page's module through wasm-pack, into the target directory's
+/// `cranpose-web/<profile>/pkg`. An application with a `web` feature builds
+/// with it and `renderer-wgpu`, without its default features, unless
+/// `targets.web` says otherwise.
+fn web_plan(
+    project: &Project,
+    request: &Request,
+    target: crate::config::Target,
+    output_directory: PathBuf,
+) -> Plan {
+    let pkg = web_pkg(project, request);
+    let mut arguments = vec![
+        "build".into(),
+        project.root.display().to_string(),
+        "--target".into(),
+        "web".into(),
+        if request.release {
+            "--release"
+        } else {
+            "--dev"
+        }
+        .into(),
+        "--out-dir".into(),
+        pkg.display().to_string(),
+        "--".into(),
+        "--locked".into(),
+    ];
+    let has_web = project.package.features.contains_key("web");
+    let mut features = target.features;
+    if features.is_empty() && has_web {
+        features.push("web".into());
+        if project.package.features.contains_key("renderer-wgpu") {
+            features.push("renderer-wgpu".into());
+        }
+    }
+    if target.no_default_features.unwrap_or(has_web) {
+        arguments.push("--no-default-features".into());
+    }
+    if !features.is_empty() {
+        arguments.extend(["--features".into(), features.join(",")]);
+    }
+    if request.offline {
+        arguments.push("--offline".into());
+    }
+    let mut environment = target.env;
+    environment.insert(
+        "CARGO_TARGET_DIR".into(),
+        project.target_dir.display().to_string(),
+    );
+    Plan {
+        platform: request.platform,
+        backend: "wasm-pack".into(),
+        program: "wasm-pack".into(),
+        arguments,
+        directory: project.root.clone(),
+        environment,
+        expected_binary: Some(pkg),
+        output_directory,
+        requirements: vec![
+            "Rust target wasm32-unknown-unknown".into(),
+            "wasm-pack".into(),
+            "Chrome or Chromium to record the first screen of a release build".into(),
+        ],
+    }
+}
+
+fn web_pkg(project: &Project, request: &Request) -> PathBuf {
+    project
+        .target_dir
+        .join("cranpose-web")
+        .join(request.profile())
+        .join("pkg")
+}
+
+/// Lays the page out in `site`: the page file, `pkg/` and the assets.
+fn write_site(project: &Project, pkg: &Path, site: &Path) -> Result<()> {
+    fs::create_dir_all(site)?;
+    let index = project.root.join(&project.config.web.index);
+    ensure!(
+        index.is_file(),
+        "The web page {} is missing; set web.index in CranposeBuild.toml",
+        index.display()
+    );
+    copy_resource(&index, site)?;
+    copy_resource(pkg, site)?;
+    for asset in &project.config.app.assets {
+        copy_resource(&project.root.join(asset), site)?;
+    }
+    Ok(())
+}
+
+/// Records the first screen of the page the first build made and builds the
+/// module again with it embedded. A recording that fails leaves the first
+/// build: the page then builds its first screen's pipelines in its first
+/// frame.
+fn embed_first_screen(
+    project: &Project,
+    plan: &Plan,
+    cancel: &Cancellation,
+    emit: &mut impl FnMut(Event),
+) -> Result<()> {
+    let pkg = plan.expected_binary.as_ref().context("Expected pkg")?;
+    emit(Event::Stage {
+        message: "Recording the first screen in headless Chrome".into(),
+    });
+    let site = tempfile::Builder::new()
+        .prefix("cranpose-web-site-")
+        .tempdir()?;
+    write_site(project, pkg, site.path())?;
+    let page = project
+        .config
+        .web
+        .index
+        .file_name()
+        .context("Web page name")?
+        .to_string_lossy()
+        .into_owned();
+    let records = match crate::web::record_first_screen(site.path(), &page, cancel, |text| {
+        emit(Event::Log { text: text.into() })
+    }) {
+        Ok(records) => records,
+        Err(error) => {
+            cancel.check()?;
+            emit(Event::Log {
+                text: format!(
+                    "The first screen was not recorded ({error:#}); the page builds its pipelines in its first frame."
+                ),
+            });
+            return Ok(());
+        }
+    };
+    let file = pkg
+        .parent()
+        .context("pkg directory")?
+        .join("first_screen_pipelines.bin");
+    fs::write(&file, records)?;
+    emit(Event::Stage {
+        message: "Building web with the first screen's pipelines".into(),
+    });
+    let mut command = Command::new(tools::tool(&plan.program)?);
+    command
+        .args(&plan.arguments)
+        .current_dir(&plan.directory)
+        .envs(&plan.environment)
+        .env("CRANPOSE_FIRST_SCREEN_PIPELINES", &file);
+    tools::apply_environment(&mut command)?;
+    process::execute(command, Duration::from_secs(7200), cancel, |text| {
+        emit(Event::Log { text: text.into() })
+    })?;
+    Ok(())
+}
+
 pub fn build(
     request: &Request,
     cancel: &Cancellation,
@@ -266,6 +421,10 @@ pub fn build(
         emit(Event::Log { text: text.into() })
     })?;
     cancel.check()?;
+    if request.platform == Platform::Web && request.release {
+        embed_first_screen(&project, &plan, cancel, &mut emit)?;
+        cancel.check()?;
+    }
     emit(Event::Stage {
         message: "Packaging application".into(),
     });
@@ -341,6 +500,21 @@ fn package(
         let path = staging.join("application.apk");
         fs::copy(&apks[0], &path)?;
         return Ok((path, None));
+    }
+    if request.platform == Platform::Web {
+        let pkg = plan.expected_binary.as_ref().context("Expected pkg")?;
+        ensure!(pkg.is_dir(), "wasm-pack did not produce {}", pkg.display());
+        let path = staging.join("application");
+        write_site(project, pkg, &path)?;
+        let page = path.join(
+            project
+                .config
+                .web
+                .index
+                .file_name()
+                .context("Web page name")?,
+        );
+        return Ok((path, Some(page)));
     }
     let source = plan
         .expected_binary
@@ -612,6 +786,9 @@ pub fn run(
     let host = Host::default();
     let mut commands = Vec::new();
     let mut installed_by_xtool = false;
+    if artifact.platform == Platform::Web {
+        return serve_page(artifact, cancel, emit);
+    }
     let desktop = !matches!(artifact.platform.os(), "ios" | "android");
     emit(Event::Stage {
         message: "Launching application".into(),
@@ -745,6 +922,44 @@ pub fn run(
         .into(),
     });
     Ok(())
+}
+
+/// Serves the page on this computer and opens it in the default browser,
+/// until the run is cancelled.
+fn serve_page(
+    artifact: &Artifact,
+    cancel: &Cancellation,
+    mut emit: impl FnMut(Event),
+) -> Result<()> {
+    let page = artifact
+        .executable
+        .as_ref()
+        .and_then(|page| page.file_name())
+        .context("No web page recorded")?
+        .to_string_lossy()
+        .into_owned();
+    let site = crate::web::Site::serve(&artifact.path)?;
+    let url = site.url(&page);
+    emit(Event::Stage {
+        message: format!("Serving {url} until stopped"),
+    });
+    let opener = match Host::default().os.as_str() {
+        "macos" => Some(("open", vec![url.clone()])),
+        "windows" => Some((
+            "cmd",
+            vec!["/C".into(), "start".into(), String::new(), url.clone()],
+        )),
+        _ => tools::find("xdg-open").map(|_| ("xdg-open", vec![url.clone()])),
+    };
+    if let Some((program, arguments)) = opener
+        && let Ok(program) = tools::tool(program)
+    {
+        let _ = Command::new(program).args(arguments).status();
+    }
+    loop {
+        cancel.check()?;
+        std::thread::sleep(Duration::from_millis(200));
+    }
 }
 
 pub fn android_activity(output: &str, identifier: &str) -> Result<String> {

@@ -240,3 +240,41 @@ fn platform_matrix_has_no_implicit_remote_routes() {
         assert_eq!(host.native().os(), os);
     }
 }
+
+#[cfg(target_os = "macos")]
+#[test]
+fn ios_device_build_without_identity_is_an_ipa_for_device_signing() -> Result<()> {
+    let root = fixture()?;
+    fs::write(
+        root.path().join("CranposeBuild.toml"),
+        "[app]\nidentifier='dev.cranpose.fixture'\n",
+    )?;
+    let request = Request::new(root.path().join("Cargo.toml"), Platform::Ios);
+    let artifact = engine::build(&request, &Cancellation::default(), |_| {})?;
+    assert!(artifact.needs_device_signing);
+    assert!(artifact.path.ends_with("Payload/Application.app"));
+    assert_eq!(
+        artifact.archive.extension().and_then(|e| e.to_str()),
+        Some("ipa")
+    );
+    let zip = zip::ZipArchive::new(fs::File::open(&artifact.archive)?)?;
+    let names: Vec<_> = zip.file_names().collect();
+    assert!(names.contains(&"Payload/Application.app/Info.plist"));
+    assert!(names.contains(&"Payload/Application.app/fixture"));
+    assert!(
+        names
+            .iter()
+            .all(|name| name.starts_with("Payload/Application.app/"))
+    );
+    let plist = plist::Value::from_file(artifact.path.join("Info.plist"))?;
+    let plist = plist.as_dictionary().expect("plist dictionary");
+    assert_eq!(
+        plist.get("CFBundleIdentifier").and_then(|v| v.as_string()),
+        Some("dev.cranpose.fixture")
+    );
+    assert_eq!(
+        plist.get("CFBundleExecutable").and_then(|v| v.as_string()),
+        Some("fixture")
+    );
+    Ok(())
+}

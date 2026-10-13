@@ -1,12 +1,12 @@
 use anyhow::Result;
-use clap::{Args, Parser, Subcommand};
-use cranpose_build::{Cancellation, Event, Host, Platform, Request, engine, tools};
+use clap::{Args, Parser, Subcommand, ValueEnum};
+use cranpose_build::{Cancellation, Event, Host, Platform, Request, engine, github, tools};
 use std::{io::Write, path::PathBuf};
 
 #[derive(Parser)]
 #[command(
     version,
-    about = "Build and launch Cranpose apps with local platform toolchains"
+    about = "Build and launch Cranpose apps with local platform toolchains or GitHub macOS runners"
 )]
 struct Cli {
     #[arg(long, global = true)]
@@ -28,10 +28,25 @@ enum Action {
     },
     /// Show the exact local command without compiling.
     Plan(BuildArgs),
-    /// Compile and package an application. No remote or CI fallback.
-    Build(BuildArgs),
+    /// Compile and package an application on this computer, or on GitHub with --on github.
+    Build {
+        #[command(flatten)]
+        args: BuildArgs,
+        #[arg(long, value_enum, default_value_t = Machine::Local)]
+        on: Machine,
+    },
     /// Compile, package, then launch on the native OS or selected device.
-    Run(BuildArgs),
+    Run {
+        #[command(flatten)]
+        args: BuildArgs,
+        #[arg(long, value_enum, default_value_t = Machine::Local)]
+        on: Machine,
+    },
+    /// Write .github/workflows/cranpose-build.yml, which --on github starts.
+    InitCi {
+        #[arg(long, default_value = "Cargo.toml")]
+        manifest_path: PathBuf,
+    },
     /// List Android devices or iOS devices/simulators.
     Devices {
         #[arg(long)]
@@ -43,6 +58,12 @@ enum Action {
         #[arg(long)]
         device: Option<String>,
     },
+}
+/// Where the application compiles. GitHub builds Apple platforms on a macOS runner.
+#[derive(Clone, Copy, ValueEnum)]
+enum Machine {
+    Local,
+    Github,
 }
 #[derive(Args)]
 struct BuildArgs {
@@ -164,15 +185,19 @@ fn execute(cli: Cli, cancel: &Cancellation) -> Result<()> {
             "{}",
             serde_json::to_string_pretty(&engine::plan(&args.into(), cancel)?)?
         ),
-        Action::Build(args) => {
-            engine::build(&args.into(), cancel, |event| emit(cli.json, event))?;
+        Action::Build { args, on } => {
+            build(&args.into(), on, cancel, cli.json)?;
         }
-        Action::Run(args) => {
+        Action::Run { args, on } => {
             let request = args.into();
-            let artifact = engine::build(&request, cancel, |event| emit(cli.json, event))?;
+            let artifact = build(&request, on, cancel, cli.json)?;
             engine::run(&artifact, request.device.as_deref(), cancel, |event| {
                 emit(cli.json, event)
             })?;
+        }
+        Action::InitCi { manifest_path } => {
+            let path = github::init(&manifest_path, cancel)?;
+            println!("{}", path.display());
         }
         Action::Devices { platform } => println!("{}", engine::devices(platform, cancel)?),
         Action::Launch { artifact, device } => {
@@ -183,4 +208,16 @@ fn execute(cli: Cli, cancel: &Cancellation) -> Result<()> {
         }
     }
     Ok(())
+}
+fn build(
+    request: &Request,
+    on: Machine,
+    cancel: &Cancellation,
+    json: bool,
+) -> Result<engine::Artifact> {
+    let emit = |event| emit(json, event);
+    match on {
+        Machine::Local => engine::build(request, cancel, emit),
+        Machine::Github => github::build(request, cancel, emit),
+    }
 }

@@ -79,12 +79,16 @@ fn the_recorder_takes_the_first_screen_a_page_leaves_at_each_viewport() -> Resul
         .prefix("cranpose record ")
         .tempdir()?;
     // A page that answers the recorder as a Cranpose page does: when asked to
-    // record, it leaves its first screen's records in a global.
+    // record, it leaves its first screen's records in a global. On its own
+    // backend it draws on WebGPU (5) at the desktop's viewport and on WebGL
+    // (4) at the phone's, as on a Chrome without WebGPU.
     fs::write(
         root.path().join("index.html"),
         "<!doctype html><meta name=\"viewport\" content=\"width=device-width\"><script>\
-         if (globalThis.__cranposeRecordFirstScreen && location.search === '?backend=gl') {\
-           setTimeout(() => { globalThis.__cranposeFirstScreenPipelines = new Uint8Array([7, 8, innerWidth > 800 ? 2 : 1]); }, 50);\
+         if (globalThis.__cranposeRecordFirstScreen) {\
+           const desktop = innerWidth > 800;\
+           const backend = location.search === '?backend=gl' || !desktop ? 4 : 5;\
+           setTimeout(() => { globalThis.__cranposeFirstScreenPipelines = new Uint8Array([7, backend, desktop ? 2 : 1]); }, 50);\
          }</script>",
     )?;
     let mut lines = Vec::new();
@@ -96,9 +100,9 @@ fn the_recorder_takes_the_first_screen_a_page_leaves_at_each_viewport() -> Resul
     )?;
     assert_eq!(
         records,
-        [7, 8, 1, 7, 8, 2],
-        "a phone's set, then a desktop's"
+        [7, 4, 1, 7, 4, 2, 7, 5, 2],
+        "a phone's set once, then a desktop's on WebGL and on WebGPU"
     );
-    assert_eq!(lines.len(), 2);
+    assert_eq!(lines.len(), 4);
     Ok(())
 }

@@ -1,0 +1,38 @@
+# Written by `cranpose-build init-ci`. Commit it to the default branch.
+# `cranpose-build build --platform ios --on github` then pushes a snapshot of the
+# working tree to a temporary branch, starts this workflow on it and downloads
+# the package. GitHub-hosted runners are free for public repositories; private
+# repositories spend the account's Actions minutes.
+name: Cranpose Build
+run-name: ${{ inputs.platform }} ${{ inputs.profile }}
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: Apple platform
+        type: choice
+        options: [mac, mac-intel, ios, ios-sim, ios-sim-intel]
+        default: ios
+      profile:
+        description: Cargo profile
+        type: choice
+        options: [debug, release]
+        default: debug
+      manifest-path:
+        description: The application's Cargo.toml, relative to the repository root
+        type: string
+        default: Cargo.toml
+      package:
+        description: Cargo package; empty selects the manifest's package
+        type: string
+        default: ''
+permissions:
+  contents: read
+jobs:
+  build:
+    uses: samoylenkodmitry/cranpose-build/.github/workflows/apple.yml@v{version}
+    with:
+      platform: ${{ inputs.platform }}
+      profile: ${{ inputs.profile }}
+      manifest-path: ${{ inputs.manifest-path }}
+      package: ${{ inputs.package }}

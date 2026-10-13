@@ -2,6 +2,7 @@
 pub mod config;
 pub mod download;
 pub mod engine;
+pub mod github;
 pub mod platform;
 pub mod process;
 pub mod project;

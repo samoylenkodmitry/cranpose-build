@@ -1,0 +1,107 @@
+name: Apple package
+# An application's cranpose-build.yml calls this workflow (see `cranpose-build init-ci`).
+# It builds one Apple platform on a GitHub macOS runner and uploads the package that
+# `cranpose-build build --on github` downloads. An iOS device package without a signing
+# identity is an IPA that xtool, AltStore or SideStore signs for a device.
+on:
+  workflow_call:
+    inputs:
+      platform:
+        description: mac, mac-intel, ios, ios-sim or ios-sim-intel
+        type: string
+        required: true
+      profile:
+        description: debug or release
+        type: string
+        default: debug
+      manifest-path:
+        description: The application's Cargo.toml, relative to the repository root
+        type: string
+        default: Cargo.toml
+      package:
+        description: Cargo package; empty selects the manifest's package
+        type: string
+        default: ''
+      runner:
+        description: macOS runner label
+        type: string
+        default: macos-latest
+      cranpose-build-version:
+        description: The cranpose-build release that builds the package
+        type: string
+        default: '0.2.0'
+      cranpose-build-rev:
+        description: A cranpose-build commit to build from source instead of the release
+        type: string
+        default: ''
+permissions:
+  contents: read
+jobs:
+  package:
+    name: ${{ inputs.platform }} ${{ inputs.profile }}
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 120
+    env:
+      PLATFORM: ${{ inputs.platform }}
+      PROFILE: ${{ inputs.profile }}
+      MANIFEST: ${{ inputs.manifest-path }}
+      PACKAGE: ${{ inputs.package }}
+      CB_VERSION: ${{ inputs.cranpose-build-version }}
+      CB_REV: ${{ inputs.cranpose-build-rev }}
+    steps:
+      - name: Check the inputs
+        id: inputs
+        run: |
+          case "$PLATFORM" in
+            mac|mac-intel|ios|ios-sim|ios-sim-intel) ;;
+            *) echo "::error::platform is mac, mac-intel, ios, ios-sim or ios-sim-intel, not '$PLATFORM'"; exit 1 ;;
+          esac
+          case "$PROFILE" in
+            debug|release) ;;
+            *) echo "::error::profile is debug or release, not '$PROFILE'"; exit 1 ;;
+          esac
+          echo "directory=$(dirname "$MANIFEST")" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v7
+      - name: Install cranpose-build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          root="$RUNNER_TEMP/cranpose-build"
+          mkdir -p "$root/bin"
+          if [ -n "$CB_REV" ]; then
+            cargo install --locked --root "$root" --git https://github.com/samoylenkodmitry/cranpose-build --rev "$CB_REV" cranpose-build
+          else
+            case "$(uname -m)" in
+              arm64) triple=aarch64-apple-darwin ;;
+              *) triple=x86_64-apple-darwin ;;
+            esac
+            gh release download "v$CB_VERSION" -R samoylenkodmitry/cranpose-build -p "cranpose-build-$triple.zip*" -D "$root"
+            (cd "$root" && shasum -a 256 -c "cranpose-build-$triple.zip.sha256" && unzip -q "cranpose-build-$triple.zip" -d bin)
+          fi
+          chmod +x "$root/bin/cranpose-build"
+          echo "$root/bin" >> "$GITHUB_PATH"
+      - name: Install the Rust target
+        working-directory: ${{ steps.inputs.outputs.directory }}
+        run: cranpose-build setup --platform "$PLATFORM"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ inputs.platform }}-${{ inputs.profile }}
+      - name: Build
+        run: |
+          args=(build --platform "$PLATFORM" --manifest-path "$MANIFEST" --output-dir "$RUNNER_TEMP/out")
+          if [ "$PROFILE" = release ]; then args+=(--release); fi
+          if [ -n "$PACKAGE" ]; then args+=(--package "$PACKAGE"); fi
+          cranpose-build "${args[@]}"
+      - name: Collect the package
+        run: |
+          mkdir -p "$RUNNER_TEMP/upload"
+          for build in "$RUNNER_TEMP/out/$PLATFORM/$PROFILE"/build-*; do
+            cp "$build/artifact.json" "$build"/application.* "$RUNNER_TEMP/upload/"
+          done
+          ls -l "$RUNNER_TEMP/upload"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: cranpose-${{ inputs.platform }}-${{ inputs.profile }}
+          path: ${{ runner.temp }}/upload/
+          if-no-files-found: error
+          retention-days: 14

@@ -57,6 +57,13 @@ pub struct Ios {
     pub entitlements: Option<PathBuf>,
 }
 
+impl Ios {
+    /// The development or distribution identity; `-` (ad-hoc) counts as none.
+    pub fn identity(&self) -> Option<&str> {
+        self.identity.as_deref().filter(|identity| *identity != "-")
+    }
+}
+
 impl Config {
     pub fn read(root: &Path) -> Result<Self> {
         let path = root.join("CranposeBuild.toml");

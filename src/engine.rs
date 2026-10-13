@@ -27,6 +27,10 @@ pub struct Artifact {
     pub identifier: String,
     pub sha256: String,
     pub archive: PathBuf,
+    /// An iOS device app without a development identity. A device installs it only after
+    /// a signing tool such as xtool, AltStore or SideStore signs it for that device.
+    #[serde(default)]
+    pub needs_device_signing: bool,
 }
 impl Artifact {
     /// Read a portable artifact manifest beside its application directory.
@@ -81,15 +85,8 @@ pub fn plan(request: &Request, cancel: &Cancellation) -> Result<Plan> {
     let project = Project::load(request, cancel)?;
     make_plan(&project, request)
 }
-fn make_plan(project: &Project, request: &Request) -> Result<Plan> {
-    let host = Host::default();
-    ensure!(
-        request.platform.os() != "ios" || host.os == "macos",
-        "iOS requires a Mac with Xcode; no remote build is performed implicitly"
-    );
-    let target = project.config.target(request.platform);
-    let backend = request.platform.backend(&host);
-    let output_directory = request
+fn output_root(project: &Project, request: &Request) -> PathBuf {
+    request
         .output_dir
         .as_ref()
         .map(|p| {
@@ -100,8 +97,33 @@ fn make_plan(project: &Project, request: &Request) -> Result<Plan> {
             }
         })
         .unwrap_or_else(|| project.root.join("dist/cranpose"))
+}
+/// The directory that receives this request's packages, one subdirectory per build.
+fn output_directory(project: &Project, request: &Request) -> PathBuf {
+    output_root(project, request)
         .join(request.platform.name())
-        .join(request.profile());
+        .join(request.profile())
+}
+/// Create the output directory. A `.gitignore` in the output root keeps packages out of
+/// Git, including the snapshots that GitHub builds push.
+pub fn prepare_output(project: &Project, request: &Request) -> Result<PathBuf> {
+    let directory = output_directory(project, request);
+    fs::create_dir_all(&directory)?;
+    let ignore = output_root(project, request).join(".gitignore");
+    if !ignore.exists() {
+        fs::write(ignore, "*\n")?;
+    }
+    Ok(directory)
+}
+fn make_plan(project: &Project, request: &Request) -> Result<Plan> {
+    let host = Host::default();
+    ensure!(
+        request.platform.os() != "ios" || host.os == "macos",
+        "iOS builds need a Mac with Xcode. Add --on github to build on a GitHub macOS runner."
+    );
+    let target = project.config.target(request.platform);
+    let backend = request.platform.backend(&host);
+    let output_directory = output_directory(project, request);
     if request.platform == Platform::Android {
         let directory = project.root.join(&project.config.android.directory);
         let wrapper = directory.join("gradle/wrapper/gradle-wrapper.jar");
@@ -247,13 +269,21 @@ pub fn build(
     emit(Event::Stage {
         message: "Packaging application".into(),
     });
-    fs::create_dir_all(&plan.output_directory)?;
+    let output = prepare_output(&project, request)?;
     let staging = tempfile::Builder::new()
         .prefix("build-")
-        .tempdir_in(&plan.output_directory)?;
+        .tempdir_in(&output)?;
     let (path, executable) = package(&project, request, &plan, staging.path(), cancel, &mut emit)?;
-    let archive = staging.path().join("application.zip");
-    archive_path(&path, &archive)?;
+    // An iOS device package is an IPA: the bundle inside a Payload directory.
+    let (archive_source, archive) = if request.platform == Platform::Ios {
+        (
+            staging.path().join("Payload"),
+            staging.path().join("application.ipa"),
+        )
+    } else {
+        (path.clone(), staging.path().join("application.zip"))
+    };
+    archive_path(&archive_source, &archive)?;
     let sha256 = hash(&archive)?;
     let artifact = Artifact {
         platform: request.platform,
@@ -266,6 +296,8 @@ pub fn build(
         },
         archive,
         sha256,
+        needs_device_signing: request.platform == Platform::Ios
+            && project.config.ios.identity().is_none(),
     };
     fs::write(
         staging.path().join("artifact.json"),
@@ -320,11 +352,13 @@ fn package(
         source.display()
     );
     let apple = matches!(request.platform.os(), "macos" | "ios");
-    let path = staging.join(if apple {
-        "Application.app"
+    let path = if request.platform == Platform::Ios {
+        staging.join("Payload/Application.app")
+    } else if apple {
+        staging.join("Application.app")
     } else {
-        "application"
-    });
+        staging.join("application")
+    };
     let contents = if request.platform.os() == "macos" {
         path.join("Contents")
     } else {
@@ -356,22 +390,13 @@ fn package(
             for asset in &project.config.ios.resources {
                 copy_resource(&project.root.join(asset), &resources)?;
             }
-            if request.platform == Platform::Ios {
-                ensure!(
-                    project
-                        .config
-                        .ios
-                        .identity
-                        .as_deref()
-                        .is_some_and(|s| s != "-"),
-                    "Physical iOS devices need ios.identity and ios.provisioning_profile; use ios-sim for ad-hoc development"
-                );
+            if request.platform == Platform::Ios && project.config.ios.identity().is_some() {
                 let profile = project
                     .config
                     .ios
                     .provisioning_profile
                     .as_ref()
-                    .context("Set ios.provisioning_profile for device builds")?;
+                    .context("Set ios.provisioning_profile beside ios.identity")?;
                 fs::copy(
                     project.root.join(profile),
                     path.join("embedded.mobileprovision"),
@@ -386,8 +411,7 @@ fn package(
                 project
                     .config
                     .ios
-                    .identity
-                    .as_deref()
+                    .identity()
                     .filter(|_| request.platform.os() == "ios")
                     .unwrap_or("-"),
             ]);
@@ -587,6 +611,7 @@ pub fn run(
 ) -> Result<()> {
     let host = Host::default();
     let mut commands = Vec::new();
+    let mut installed_by_xtool = false;
     let desktop = !matches!(artifact.platform.os(), "ios" | "android");
     emit(Event::Stage {
         message: "Launching application".into(),
@@ -603,8 +628,22 @@ pub fn run(
         let mut launch = Command::new(tools::tool("xcrun")?);
         launch.args(["simctl", "launch", device, &artifact.identifier]);
         commands.push(launch);
+    } else if artifact.platform == Platform::Ios
+        && (host.os != "macos" || artifact.needs_device_signing)
+    {
+        // xtool signs the app with the user's Apple account for this device and
+        // installs it over USB. It registers the app under its own bundle ID.
+        let device =
+            device.context("Select an iPhone with --device <UDID>; use devices --platform ios")?;
+        let mut install = Command::new(tools::find("xtool").context(
+            "Installing on an iPhone from this computer needs xtool from https://xtool.sh",
+        )?);
+        install
+            .args(["install", "--udid", device])
+            .arg(&artifact.path);
+        commands.push(install);
+        installed_by_xtool = true;
     } else if artifact.platform == Platform::Ios {
-        ensure!(host.os == "macos", "iOS device deployment requires Xcode");
         let device = device.context("Select an iOS device with --device <UDID>")?;
         let mut install = Command::new(tools::tool("xcrun")?);
         install
@@ -696,7 +735,9 @@ pub fn run(
         )?;
     }
     emit(Event::Stage {
-        message: if matches!(artifact.platform.os(), "ios" | "android") {
+        message: if installed_by_xtool {
+            "Application installed. Open it on the device; xtool gave it its own bundle ID."
+        } else if matches!(artifact.platform.os(), "ios" | "android") {
             "Application launched"
         } else {
             "Application exited"
@@ -733,6 +774,9 @@ pub fn devices(platform: Platform, cancel: &Cancellation) -> Result<String> {
     } else if platform.simulator() {
         command = Command::new(tools::tool("xcrun")?);
         command.args(["simctl", "list", "devices", "available", "--json"]);
+    } else if platform == Platform::Ios && Host::default().os != "macos" {
+        command = Command::new(tools::tool("xtool")?);
+        command.args(["devices", "--no-wait"]);
     } else if platform == Platform::Ios {
         command = Command::new(tools::tool("xcrun")?);
         command.args(["devicectl", "list", "devices"]);

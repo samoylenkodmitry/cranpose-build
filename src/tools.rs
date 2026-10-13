@@ -121,9 +121,16 @@ pub fn doctor(platform: Platform, cancel: &Cancellation) -> Doctor {
         "gradle" => required.push("java"),
         _ => {}
     }
-    if platform.os() == "ios" || (platform.os() == "macos" && host.os == "macos") {
+    if host.os == "macos" && matches!(platform.os(), "ios" | "macos") {
         required.push("xcrun");
         required.push("codesign");
+    }
+    if host.os != "macos" && platform.os() == "ios" {
+        // iOS compiles on a GitHub macOS runner; xtool installs the result on an iPhone.
+        required.extend(["git", "gh"]);
+        if platform == Platform::Ios {
+            required.push("xtool");
+        }
     }
     for name in required {
         let path = find(name);
@@ -135,16 +142,15 @@ pub fn doctor(platform: Platform, cancel: &Cancellation) -> Doctor {
                 .unwrap_or_else(|| installation_hint(name).into()),
         });
     }
-    if platform.os() == "ios" && host.os != "macos" {
-        checks.push(Check { name: "Xcode host".into(), ready: false, detail: "iOS packaging, signing and simulator launch require macOS with Xcode. Use an explicit Mac builder.".into() });
-    }
     if platform.os() == "macos" && host.os != "macos" {
         let sdk = std::env::var_os("SDKROOT").map(PathBuf::from);
-        checks.push(Check { name: "Apple SDK".into(), ready: sdk.as_ref().is_some_and(|p| p.is_dir()), detail: "Set SDKROOT to your locally provisioned macOS SDK; the tool does not redistribute Apple SDKs.".into() });
+        checks.push(Check { name: "Apple SDK".into(), ready: sdk.as_ref().is_some_and(|p| p.is_dir()), detail: "Set SDKROOT to your locally provisioned macOS SDK; the tool does not redistribute Apple SDKs. Without it, build with --on github.".into() });
     }
     if platform == Platform::Android {
         checks.push(Check { name: "Android SDK".into(), ready: android_sdk().is_some_and(|p| p.is_dir()), detail: "Install Android SDK, NDK and build tools with Android Studio; review their licenses. ANDROID_HOME selects the SDK.".into() });
-    } else if let Some(rustup) = find("rustup") {
+    } else if (platform.os() != "ios" || host.os == "macos")
+        && let Some(rustup) = find("rustup")
+    {
         let mut command = Command::new(rustup);
         command.args(["target", "list", "--installed"]);
         let installed = process::capture(command, cancel).unwrap_or_default();
@@ -162,6 +168,10 @@ pub fn doctor(platform: Platform, cancel: &Cancellation) -> Doctor {
         "Install and launch in an explicit booted iOS simulator"
     } else if platform == Platform::Ios && host.os == "macos" {
         "Signed device install and launch with Xcode devicectl"
+    } else if platform == Platform::Ios {
+        "Build with --on github, then xtool signs and installs it on a USB iPhone"
+    } else if platform.os() == "ios" {
+        "Build with --on github; the simulator runs only on macOS"
     } else {
         "Build only on this host; launch on a matching OS or explicit VM/device"
     }
@@ -185,6 +195,9 @@ fn installation_hint(name: &str) -> &'static str {
         }
         "java" => "Install a JDK 17 or newer and set JAVA_HOME",
         "xcrun" | "codesign" => "Install Xcode and select it with xcode-select",
+        "git" => "Install Git from https://git-scm.com",
+        "gh" => "Install the GitHub CLI from https://cli.github.com, then run gh auth login",
+        "xtool" => "Install xtool from https://xtool.sh (on Windows, inside WSL)",
         _ => "Install the platform SDK tool and add it to PATH",
     }
 }
@@ -193,7 +206,10 @@ fn installation_hint(name: &str) -> &'static str {
 pub fn setup(platform: Platform, cancel: &Cancellation, mut log: impl FnMut(&str)) -> Result<()> {
     let host = Host::default();
     if platform.os() == "ios" && host.os != "macos" {
-        bail!("Set up iOS on a Mac with Xcode");
+        bail!(
+            "iOS builds run on a Mac. From this computer use build --platform {} --on github, and install xtool from https://xtool.sh for iPhone installs.",
+            platform.name()
+        );
     }
     let mut target = Command::new(tool("rustup")?);
     target.args(["target", "add", platform.triple()]);

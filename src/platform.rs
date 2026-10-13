@@ -14,10 +14,11 @@ pub enum Platform {
     Ios,
     IosSim,
     IosSimIntel,
+    Web,
 }
 
 impl Platform {
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 11] = [
         Self::Mac,
         Self::MacIntel,
         Self::Linux,
@@ -28,6 +29,7 @@ impl Platform {
         Self::Ios,
         Self::IosSim,
         Self::IosSimIntel,
+        Self::Web,
     ];
     pub fn triple(self) -> &'static str {
         match self {
@@ -41,6 +43,7 @@ impl Platform {
             Self::Ios => "aarch64-apple-ios",
             Self::IosSim => "aarch64-apple-ios-sim",
             Self::IosSimIntel => "x86_64-apple-ios",
+            Self::Web => "wasm32-unknown-unknown",
         }
     }
     pub fn os(self) -> &'static str {
@@ -50,6 +53,7 @@ impl Platform {
             Self::Windows | Self::WindowsArm => "windows",
             Self::Android => "android",
             Self::Ios | Self::IosSim | Self::IosSimIntel => "ios",
+            Self::Web => "web",
         }
     }
     pub fn name(self) -> &'static str {
@@ -64,6 +68,7 @@ impl Platform {
             Self::Ios => "ios",
             Self::IosSim => "ios-sim",
             Self::IosSimIntel => "ios-sim-intel",
+            Self::Web => "web",
         }
     }
     pub fn simulator(self) -> bool {
@@ -72,6 +77,8 @@ impl Platform {
     pub fn backend(self, host: &Host) -> &'static str {
         if self == Self::Android {
             "gradle"
+        } else if self == Self::Web {
+            "wasm-pack"
         } else if self.os() == "windows" && host.os != "windows" {
             "cargo-xwin"
         } else if (self.os() == "linux"

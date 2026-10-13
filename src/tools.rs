@@ -119,6 +119,7 @@ pub fn doctor(platform: Platform, cancel: &Cancellation) -> Doctor {
         "cargo-xwin" => required.extend(["cargo-xwin", "clang-cl", "llvm-lib"]),
         "cargo-zigbuild" => required.extend(["cargo-zigbuild", "zig"]),
         "gradle" => required.push("java"),
+        "wasm-pack" => required.push("wasm-pack"),
         _ => {}
     }
     if host.os == "macos" && matches!(platform.os(), "ios" | "macos") {
@@ -160,7 +161,9 @@ pub fn doctor(platform: Platform, cancel: &Cancellation) -> Doctor {
             detail: format!("cranpose-build setup --platform {}", platform.name()),
         });
     }
-    let launch = if platform.os() == host.os {
+    let launch = if platform == Platform::Web {
+        "Serves the page on this computer and opens it in the default browser"
+    } else if platform.os() == host.os {
         "Native launch on this host"
     } else if platform == Platform::Android {
         "adb install and launch on an explicit device/emulator"
@@ -177,6 +180,18 @@ pub fn doctor(platform: Platform, cancel: &Cancellation) -> Doctor {
     }
     .into();
     let ready = checks.iter().all(|c| c.ready);
+    if platform == Platform::Web {
+        // A release build records its first screen in Chrome; without one it
+        // still builds, and the page builds those pipelines in its first frame.
+        let chrome = crate::web::find_chrome();
+        checks.push(Check {
+            name: "Chrome (optional)".into(),
+            ready: chrome.is_some(),
+            detail: chrome.map(|p| p.display().to_string()).unwrap_or_else(|| {
+                "Install Chrome or Chromium, or set CHROME, so release builds record the first screen's pipelines".into()
+            }),
+        });
+    }
     Doctor {
         host,
         platform,
@@ -188,7 +203,9 @@ pub fn doctor(platform: Platform, cancel: &Cancellation) -> Doctor {
 fn installation_hint(name: &str) -> &'static str {
     match name {
         "cargo" | "rustc" | "rustup" => "Install Rust from https://rustup.rs",
-        "cargo-xwin" | "cargo-zigbuild" => "Run cranpose-build setup --platform <platform>",
+        "cargo-xwin" | "cargo-zigbuild" | "wasm-pack" => {
+            "Run cranpose-build setup --platform <platform>"
+        }
         "zig" => "Install Zig from https://ziglang.org/download/ and add it to PATH",
         "clang" | "llvm-lib" | "lld-link" => {
             "Install LLVM from https://releases.llvm.org and add its bin directory to PATH"
@@ -217,6 +234,7 @@ pub fn setup(platform: Platform, cancel: &Cancellation, mut log: impl FnMut(&str
     let backend = match platform.backend(&host) {
         "cargo-xwin" => Some(("cargo-xwin", "0.23.0")),
         "cargo-zigbuild" => Some(("cargo-zigbuild", "0.23.4")),
+        "wasm-pack" => Some(("wasm-pack", "0.15.0")),
         _ => None,
     };
     if let Some((name, version)) = backend {

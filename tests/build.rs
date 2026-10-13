@@ -233,8 +233,14 @@ fn platform_matrix_has_no_implicit_remote_routes() {
         };
         for target in Platform::ALL {
             assert!(
-                ["cargo", "cargo-xwin", "cargo-zigbuild", "gradle"]
-                    .contains(&target.backend(&host))
+                [
+                    "cargo",
+                    "cargo-xwin",
+                    "cargo-zigbuild",
+                    "gradle",
+                    "wasm-pack"
+                ]
+                .contains(&target.backend(&host))
             );
         }
         assert_eq!(host.native().os(), os);

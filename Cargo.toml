@@ -24,6 +24,7 @@ tempfile = "3"
 ctrlc = "3"
 ureq = { version = "3.4", features = ["json"] }
 cranpose-plugin-process = { git = "https://github.com/samoylenkodmitry/cranpose-intellij-plugin-template", rev = "4775cda8d7a716d6f2f209336fd2f602a6959b3e", version = "0.10.0" }
+tungstenite = { version = "0.30.0", default-features = false, features = ["handshake"] }
 
 [lints.rust]
 unsafe_code = "forbid"

@@ -13,6 +13,7 @@ pub struct Config {
     pub targets: BTreeMap<String, Target>,
     pub android: Android,
     pub ios: Ios,
+    pub web: Web,
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -55,6 +56,20 @@ pub struct Ios {
     pub identity: Option<String>,
     pub provisioning_profile: Option<PathBuf>,
     pub entitlements: Option<PathBuf>,
+}
+
+/// The web page: the HTML file that loads the application's `pkg/` module.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Web {
+    pub index: PathBuf,
+}
+impl Default for Web {
+    fn default() -> Self {
+        Self {
+            index: "index.html".into(),
+        }
+    }
 }
 
 impl Ios {

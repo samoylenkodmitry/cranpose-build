@@ -16,6 +16,7 @@ cranpose-build run --platform ios-sim --device <simulator-UDID>
 cranpose-build init-ci
 cranpose-build build --platform mac --on github
 cranpose-build run --platform ios --on github --device <iPhone-UDID>
+cranpose-build build --platform web --release
 ```
 
 ## Platforms
@@ -27,6 +28,7 @@ cranpose-build run --platform ios --on github --device <iPhone-UDID>
 | Windows x64 / ARM64 | Native MSVC Cargo or cargo-xwin with LLVM and Microsoft SDK/CRT | Executable, assets and configured runtime libraries; native launch |
 | Android | Existing Cranpose Gradle project, SDK and NDK | APK, adb install and launch |
 | iOS devices / simulators | Cargo and Xcode on macOS, or a GitHub macOS runner with `--on github` | `.app` and device `.ipa`; Xcode device/simulator install and launch on macOS; xtool device install elsewhere |
+| Web | wasm-pack; headless Chrome or Chromium records a release build's first screen | A page directory with the HTML page, `pkg/` and assets; `run` serves it on this computer and opens the default browser |
 
 Foreign applications still need their OS, VM or device to run. The iOS simulator
 runs only on macOS. Apple SDKs are not redistributed. Native dependencies
@@ -129,10 +131,13 @@ resources = ["ios/AppIcon.png"]
 # identity = "Apple Development: ..."
 # provisioning_profile = "local/development.mobileprovision"
 # entitlements = "local/entitlements.plist"
+
+[web]
+index = "index.html"
 ```
 
 Targets are `mac`, `mac-intel`, `linux`, `linux-arm`, `windows`, `windows-arm`,
-`android`, `ios`, `ios-sim` and `ios-sim-intel`. OS configuration, such as
+`android`, `ios`, `ios-sim`, `ios-sim-intel` and `web`. OS configuration, such as
 `targets.ios`, also applies to its variants. Desktop builds keep existing default
 features. iOS selects the package's `ios` feature with defaults disabled unless
 overridden. `runtime_files` can copy explicitly selected shared libraries beside
@@ -158,6 +163,23 @@ then `Application exited` after a successful exit. A failed spawn never reports
 running. This status does not promise a rendered frame or application readiness.
 Mobile tools retain `Application launched` after their successful device handoff;
 their launcher process is not the application process.
+
+## Web pages
+
+`--platform web` builds the package's library with wasm-pack into
+`<target-dir>/cranpose-web/<profile>/pkg`. A package with a `web` feature builds
+with it and `renderer-wgpu`, without its default features, unless `targets.web`
+sets them. The package directory holds the HTML page (`web.index`) that loads
+`pkg/`.
+
+A release build then opens the built page in headless Chrome, at a phone's and a
+desktop's viewport, records the render pipelines its first screen draws with,
+and builds the module again with them embedded (`CRANPOSE_FIRST_SCREEN_PIPELINES`).
+On WebGL the page builds those pipelines as it starts, so the browser compiles
+them while the page composes its first screen instead of during its first frame.
+`doctor --platform web` reports whether Chrome was found; `CHROME` names its
+executable. Without Chrome the build keeps the first module, and the page builds
+its first screen's pipelines in its first frame.
 
 ## Development
 

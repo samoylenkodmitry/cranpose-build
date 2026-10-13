@@ -254,12 +254,10 @@ fn builds_a_snapshot_of_the_working_tree_and_imports_the_package() -> Result<()>
     )?;
     assert_eq!(reloaded.path, artifact.path);
 
-    // The temporary branch is gone, and the user's index and files are untouched.
+    // The temporary branch is gone, and the user's index and files are untouched. Packages
+    // stay out of Git, so the next snapshot does not carry them.
     assert_eq!(fixture.remote_branches()?, "");
-    let status = git(
-        &fixture.path("repo"),
-        &["status", "--porcelain", "--", "app/src"],
-    )?;
+    let status = git(&fixture.path("repo"), &["status", "--porcelain"])?;
     assert_eq!(status, " M app/src/main.rs\n?? app/src/extra.rs\n");
     Ok(())
 }

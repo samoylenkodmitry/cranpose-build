@@ -85,8 +85,7 @@ pub fn plan(request: &Request, cancel: &Cancellation) -> Result<Plan> {
     let project = Project::load(request, cancel)?;
     make_plan(&project, request)
 }
-/// The directory that receives this request's packages, one subdirectory per build.
-pub fn output_directory(project: &Project, request: &Request) -> PathBuf {
+fn output_root(project: &Project, request: &Request) -> PathBuf {
     request
         .output_dir
         .as_ref()
@@ -98,8 +97,23 @@ pub fn output_directory(project: &Project, request: &Request) -> PathBuf {
             }
         })
         .unwrap_or_else(|| project.root.join("dist/cranpose"))
+}
+/// The directory that receives this request's packages, one subdirectory per build.
+fn output_directory(project: &Project, request: &Request) -> PathBuf {
+    output_root(project, request)
         .join(request.platform.name())
         .join(request.profile())
+}
+/// Create the output directory. A `.gitignore` in the output root keeps packages out of
+/// Git, including the snapshots that GitHub builds push.
+pub fn prepare_output(project: &Project, request: &Request) -> Result<PathBuf> {
+    let directory = output_directory(project, request);
+    fs::create_dir_all(&directory)?;
+    let ignore = output_root(project, request).join(".gitignore");
+    if !ignore.exists() {
+        fs::write(ignore, "*\n")?;
+    }
+    Ok(directory)
 }
 fn make_plan(project: &Project, request: &Request) -> Result<Plan> {
     let host = Host::default();
@@ -255,10 +269,10 @@ pub fn build(
     emit(Event::Stage {
         message: "Packaging application".into(),
     });
-    fs::create_dir_all(&plan.output_directory)?;
+    let output = prepare_output(&project, request)?;
     let staging = tempfile::Builder::new()
         .prefix("build-")
-        .tempdir_in(&plan.output_directory)?;
+        .tempdir_in(&output)?;
     let (path, executable) = package(&project, request, &plan, staging.path(), cancel, &mut emit)?;
     // An iOS device package is an IPA: the bundle inside a Payload directory.
     let (archive_source, archive) = if request.platform == Platform::Ios {

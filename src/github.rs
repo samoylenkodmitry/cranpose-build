@@ -189,8 +189,7 @@ pub fn build(
     emit(Event::Stage {
         message: "Downloading the package".into(),
     });
-    let output = engine::output_directory(&project, request);
-    fs::create_dir_all(&output)?;
+    let output = engine::prepare_output(&project, request)?;
     let staging = tempfile::Builder::new()
         .prefix("build-")
         .tempdir_in(&output)?;

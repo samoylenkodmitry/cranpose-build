@@ -142,7 +142,8 @@ Builds use Cargo.lock with `--locked`. Source files and application release
 configuration are unchanged. No hot-reload instrumentation is injected.
 Outputs are isolated beneath `dist/cranpose/<platform>/<profile>`, including the
 application, a ZIP (an IPA for iOS devices), its SHA256 and `artifact.json`. Use `--target-dir` for Cargo caches
-and `--output-dir` for packages. Failures do not publish successful artifacts.
+and `--output-dir` for packages. A `.gitignore` in the output root keeps packages
+out of Git. Failures do not publish successful artifacts.
 The build directory is portable: copy it to the matching OS and run
 `cranpose-build launch --artifact /path/to/build-directory/artifact.json`.
 Manifest paths are relative to that directory; moving a package does not require

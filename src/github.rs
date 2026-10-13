@@ -132,8 +132,11 @@ pub fn build(
     push.arg(format!("{commit}:refs/heads/{}", remote.branch))
         .env("GIT_TERMINAL_PROMPT", "0");
     remote.pushed = true;
+    // GitHub answers a new branch with a hint to open a pull request; the branch is temporary.
     process::execute(push, Duration::from_secs(1800), cancel, |text| {
-        emit(Event::Log { text: text.into() })
+        if !text.starts_with("remote:") {
+            emit(Event::Log { text: text.into() })
+        }
     })?;
 
     emit(Event::Stage {

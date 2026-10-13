@@ -635,10 +635,9 @@ pub fn run(
         // installs it over USB. It registers the app under its own bundle ID.
         let device =
             device.context("Select an iPhone with --device <UDID>; use devices --platform ios")?;
-        let mut install =
-            Command::new(tools::tool("xtool").context(
-                "Installing on an iPhone from this computer needs xtool: https://xtool.sh",
-            )?);
+        let mut install = Command::new(tools::find("xtool").context(
+            "Installing on an iPhone from this computer needs xtool from https://xtool.sh",
+        )?);
         install
             .args(["install", "--udid", device])
             .arg(&artifact.path);

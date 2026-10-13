@@ -173,10 +173,11 @@ sets them. The package directory holds the HTML page (`web.index`) that loads
 `pkg/`.
 
 A release build then opens the built page in headless Chrome, at a phone's and a
-desktop's viewport, records the render pipelines its first screen draws with,
-and builds the module again with them embedded (`CRANPOSE_FIRST_SCREEN_PIPELINES`).
-On WebGL the page builds those pipelines as it starts, so the browser compiles
-them while the page composes its first screen instead of during its first frame.
+desktop's viewport, on WebGL and on WebGPU where Chrome has it, records the
+render pipelines its first screen draws with, and builds the module again with
+them embedded (`CRANPOSE_FIRST_SCREEN_PIPELINES`). The page builds those
+pipelines as it starts, so the browser compiles them while the page composes its
+first screen instead of during its first frame.
 `doctor --platform web` reports whether Chrome was found; `CHROME` names its
 executable. Without Chrome the build keeps the first module, and the page builds
 its first screen's pipelines in its first frame.

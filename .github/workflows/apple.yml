@@ -29,7 +29,7 @@ on:
       cranpose-build-version:
         description: The cranpose-build release that builds the package
         type: string
-        default: '0.3.0'
+        default: '0.3.1'
       cranpose-build-rev:
         description: A cranpose-build commit to build from source instead of the release
         type: string

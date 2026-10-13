@@ -231,9 +231,11 @@ const VIEWPORTS: [Viewport; 2] = [
 /// How long a page may take to record its first screen.
 const RECORD_TIMEOUT: Duration = Duration::from_secs(60);
 
-/// Opens `page` of the site in `root` on WebGL in headless Chrome at a phone's
-/// and a desktop's viewport, and returns the first screens it recorded, one
-/// set after another, as the page's build embeds them.
+/// Opens `page` of the site in `root` in headless Chrome at a phone's and a
+/// desktop's viewport, on WebGL and on the backend the page picks itself,
+/// and returns the first screens it recorded, one set after another, as the
+/// page's build embeds them. A run that records what an earlier one did, as
+/// one on a Chrome without WebGPU does, adds nothing.
 pub fn record_first_screen(
     root: &Path,
     page: &str,
@@ -243,21 +245,28 @@ pub fn record_first_screen(
     let chrome =
         find_chrome().context("Chrome or Chromium is missing; set CHROME to its executable")?;
     let site = Site::serve(root)?;
-    let url = format!("{}?backend=gl", site.url(page));
-    let mut records = Vec::new();
+    let own = site.url(page);
+    let gl = format!("{own}?backend=gl");
+    let mut sets: Vec<Vec<u8>> = Vec::new();
     for viewport in &VIEWPORTS {
-        cancel.check()?;
-        let mut browser = Browser::launch(&chrome, viewport)?;
-        let set = browser.record(&url, viewport, cancel)?;
-        log(&format!(
-            "First screen at {}x{}: {} bytes of pipeline records",
-            viewport.width,
-            viewport.height,
-            set.len()
-        ));
-        records.extend(set);
+        for (url, backend) in [(gl.as_str(), "WebGL"), (own.as_str(), "its own backend")] {
+            cancel.check()?;
+            let mut browser = Browser::launch(&chrome, viewport)?;
+            let set = browser.record(url, viewport, cancel)?;
+            let recorded = sets.contains(&set);
+            log(&format!(
+                "First screen at {}x{} on {backend}: {} bytes of pipeline records{}",
+                viewport.width,
+                viewport.height,
+                set.len(),
+                if recorded { ", recorded already" } else { "" }
+            ));
+            if !recorded {
+                sets.push(set);
+            }
+        }
     }
-    Ok(records)
+    Ok(sets.concat())
 }
 
 struct Browser {

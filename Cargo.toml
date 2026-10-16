@@ -1,6 +1,6 @@
 [package]
 name = "cranpose-build"
-version = "0.3.1"
+version = "0.3.2"
 edition = "2024"
 license = "Apache-2.0"
 description = "Build, package and run Cranpose apps across desktop and mobile platforms"
@@ -23,7 +23,7 @@ sha2 = "0.10"
 tempfile = "3"
 ctrlc = "3"
 ureq = { version = "3.4", features = ["json"] }
-cranpose-plugin-process = { git = "https://github.com/samoylenkodmitry/cranpose-intellij-plugin-template", rev = "4775cda8d7a716d6f2f209336fd2f602a6959b3e", version = "0.10.0" }
+cranpose-plugin-process = { git = "https://github.com/samoylenkodmitry/cranpose-intellij-plugin-template", rev = "6d192bb9c1d0246a8baefabba61c28ffcbb00946", version = "0.10.2" }
 tungstenite = { version = "0.30.0", default-features = false, features = ["handshake"] }
 
 [lints.rust]

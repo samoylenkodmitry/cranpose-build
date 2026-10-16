@@ -338,7 +338,7 @@ dependencies = [
 
 [[package]]
 name = "cranpose-build"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "anyhow",
  "cargo_metadata",
@@ -366,8 +366,8 @@ dependencies = [
 
 [[package]]
 name = "cranpose-plugin-process"
-version = "0.10.0"
-source = "git+https://github.com/samoylenkodmitry/cranpose-intellij-plugin-template?rev=4775cda8d7a716d6f2f209336fd2f602a6959b3e#4775cda8d7a716d6f2f209336fd2f602a6959b3e"
+version = "0.10.2"
+source = "git+https://github.com/samoylenkodmitry/cranpose-intellij-plugin-template?rev=6d192bb9c1d0246a8baefabba61c28ffcbb00946#6d192bb9c1d0246a8baefabba61c28ffcbb00946"
 dependencies = [
  "anyhow",
  "libproc",
@@ -509,7 +509,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -1038,7 +1038,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -1245,7 +1245,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]

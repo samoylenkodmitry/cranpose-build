@@ -92,6 +92,16 @@ cargo install --locked --git https://github.com/samoylenkodmitry/cranpose-build
 official server, checked against its published SHA256. Setup does not install Git,
 replace Rust, change shell profiles or accept SDK licenses. Rust, platform SDKs,
 LLVM/MSVC and a JDK remain prerequisites; `doctor` provides their setup guidance.
+
+On Windows, `doctor --platform windows` checks the Visual Studio installation
+Rust links with: the MSVC build tools, a Windows SDK and, for x64 builds, C++
+ATL. Cranpose's x64 renderer links Microsoft's static DirectX shader compiler,
+which needs ATL's `atls.lib`; without it the link stops with `LNK1104`.
+`setup` opens the Visual Studio Installer with the missing components selected,
+or winget on a PC without Visual Studio, and you confirm the installation there.
+Builds through cargo-xwin set `XWIN_INCLUDE_ATL=true` and keep their SDK in
+`~/.cranpose-build/xwin-atl`, because cargo-xwin adds ATL only to a new cache.
+`XWIN_CACHE_DIR` chooses another cache.
 `LLVM_HOME`, `JAVA_HOME`, `ANDROID_HOME`, `SDKROOT` and Cargo's environment variables
 are supported. SDK downloads require network access; builds can use `--offline`
 after Cargo/Gradle dependencies are cached.

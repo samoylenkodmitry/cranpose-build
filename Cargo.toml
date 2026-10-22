@@ -23,7 +23,8 @@ sha2 = "0.10"
 tempfile = "3"
 ctrlc = "3"
 ureq = { version = "3.4", features = ["json"] }
-cranpose-plugin-process = { git = "https://github.com/samoylenkodmitry/cranpose-intellij-plugin-template", rev = "6d192bb9c1d0246a8baefabba61c28ffcbb00946", version = "0.10.2" }
+cranpose-plugin-process = { git = "https://github.com/samoylenkodmitry/cranpose-intellij-plugin-template", rev = "37fc445bf0b25d6f9d10b0bc015f1eaf3e10d2c5", version = "0.10.2" }
+cranpose-plugin-toolchain = { git = "https://github.com/samoylenkodmitry/cranpose-intellij-plugin-template", rev = "37fc445bf0b25d6f9d10b0bc015f1eaf3e10d2c5", version = "0.10.2" }
 tungstenite = { version = "0.30.0", default-features = false, features = ["handshake"] }
 
 [lints.rust]

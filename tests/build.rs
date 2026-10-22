@@ -178,6 +178,22 @@ fn planning_is_read_only_and_selects_cross_backends() -> Result<()> {
     );
     assert!(plan.arguments.contains(&"--release".into()));
     assert!(plan.arguments.contains(&"--offline".into()));
+    if plan.backend == "cargo-xwin" {
+        // The x64 renderer's shader compiler links ATL's atls.lib.
+        assert_eq!(
+            plan.environment.get("XWIN_INCLUDE_ATL").map(String::as_str),
+            Some("true")
+        );
+        if std::env::var_os("XWIN_CACHE_DIR").is_none() {
+            assert!(
+                plan.environment
+                    .get("XWIN_CACHE_DIR")
+                    .is_some_and(|dir| dir.ends_with("xwin-atl")),
+                "a cache cargo-xwin filled without ATL never gains it: {:?}",
+                plan.environment
+            );
+        }
+    }
     assert!(
         plan.expected_binary
             .expect("executable")

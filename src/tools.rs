@@ -1,5 +1,6 @@
 use crate::{Cancellation, Host, Platform, process};
 use anyhow::{Context, Result, bail};
+use cranpose_plugin_toolchain::{Arch, WindowsBuildTools};
 use serde::{Deserialize, Serialize};
 use std::{
     path::{Path, PathBuf},
@@ -147,6 +148,11 @@ pub fn doctor(platform: Platform, cancel: &Cancellation) -> Doctor {
         let sdk = std::env::var_os("SDKROOT").map(PathBuf::from);
         checks.push(Check { name: "Apple SDK".into(), ready: sdk.as_ref().is_some_and(|p| p.is_dir()), detail: "Set SDKROOT to your locally provisioned macOS SDK; the tool does not redistribute Apple SDKs. Without it, build with --on github.".into() });
     }
+    if host.os == "windows"
+        && let Some(arch) = windows_arch(platform)
+    {
+        checks.extend(windows_build_tools_checks(arch));
+    }
     if platform == Platform::Android {
         checks.push(Check { name: "Android SDK".into(), ready: android_sdk().is_some_and(|p| p.is_dir()), detail: "Install Android SDK, NDK and build tools with Android Studio; review their licenses. ANDROID_HOME selects the SDK.".into() });
     } else if (platform.os() != "ios" || host.os == "macos")
@@ -200,6 +206,45 @@ pub fn doctor(platform: Platform, cancel: &Cancellation) -> Doctor {
         launch,
     }
 }
+/// The architecture of a native Windows build for `platform`.
+fn windows_arch(platform: Platform) -> Option<Arch> {
+    match platform {
+        Platform::Windows => Some(Arch::X64),
+        Platform::WindowsArm => Some(Arch::Arm64),
+        _ => None,
+    }
+}
+
+/// One check for each Visual Studio component a native Windows build for
+/// `arch` links with. A missing one names the installer command.
+fn windows_build_tools_checks(arch: Arch) -> Vec<Check> {
+    let tools = WindowsBuildTools::detect_for(arch);
+    let install = tools
+        .install()
+        .map(|install| format!("cranpose-build setup runs: {}", install.powershell()))
+        .unwrap_or_default();
+    let installation = tools
+        .installation
+        .as_ref()
+        .map(|path| path.display().to_string())
+        .unwrap_or_default();
+    arch.components()
+        .iter()
+        .map(|component| {
+            let ready = !tools.missing.contains(component);
+            Check {
+                name: component.title.into(),
+                ready,
+                detail: if ready {
+                    installation.clone()
+                } else {
+                    install.clone()
+                },
+            }
+        })
+        .collect()
+}
+
 fn installation_hint(name: &str) -> &'static str {
     match name {
         "cargo" | "rustc" | "rustup" => "Install Rust from https://rustup.rs",
@@ -227,6 +272,18 @@ pub fn setup(platform: Platform, cancel: &Cancellation, mut log: impl FnMut(&str
             "iOS builds run on a Mac. From this computer use build --platform {} --on github, and install xtool from https://xtool.sh for iPhone installs.",
             platform.name()
         );
+    }
+    if host.os == "windows"
+        && let Some(install) =
+            windows_arch(platform).and_then(|arch| WindowsBuildTools::detect_for(arch).install())
+    {
+        log(&format!(
+            "Opening the Visual Studio Installer with the missing C++ parts selected. Confirm the installation there, then build again: {}",
+            install.powershell()
+        ));
+        install
+            .spawn()
+            .context("start the Visual Studio Installer")?;
     }
     let mut target = Command::new(tool("rustup")?);
     target.args(["target", "add", platform.triple()]);

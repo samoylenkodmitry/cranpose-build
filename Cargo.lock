@@ -344,6 +344,7 @@ dependencies = [
  "cargo_metadata",
  "clap",
  "cranpose-plugin-process",
+ "cranpose-plugin-toolchain",
  "ctrlc",
  "plist",
  "serde",
@@ -367,12 +368,20 @@ dependencies = [
 [[package]]
 name = "cranpose-plugin-process"
 version = "0.10.2"
-source = "git+https://github.com/samoylenkodmitry/cranpose-intellij-plugin-template?rev=6d192bb9c1d0246a8baefabba61c28ffcbb00946#6d192bb9c1d0246a8baefabba61c28ffcbb00946"
+source = "git+https://github.com/samoylenkodmitry/cranpose-intellij-plugin-template?rev=fcac89d278a404e2bedb34409e0fa722bf7fcc9e#fcac89d278a404e2bedb34409e0fa722bf7fcc9e"
 dependencies = [
  "anyhow",
  "libproc",
  "nix 0.30.1",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "cranpose-plugin-toolchain"
+version = "0.10.2"
+source = "git+https://github.com/samoylenkodmitry/cranpose-intellij-plugin-template?rev=fcac89d278a404e2bedb34409e0fa722bf7fcc9e#fcac89d278a404e2bedb34409e0fa722bf7fcc9e"
+dependencies = [
+ "cranpose-plugin-process",
 ]
 
 [[package]]

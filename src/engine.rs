@@ -223,8 +223,26 @@ fn make_plan(project: &Project, request: &Request) -> Result<Plan> {
         .join(request.profile())
         .join(filename);
     let mut requirements = vec![format!("Rust target {}", request.platform.triple())];
+    let mut environment = target.env;
     if backend == "cargo-xwin" {
         requirements.push("LLVM and cargo-xwin; Microsoft SDK/CRT licenses apply".into());
+        // Cranpose's x64 renderer links Microsoft's static DirectX shader
+        // compiler, which needs ATL's `atls.lib`. cargo-xwin fetches ATL
+        // only with XWIN_INCLUDE_ATL, and never into a cache it already
+        // filled for the architecture, so the build keeps a cache of its own.
+        environment
+            .entry("XWIN_INCLUDE_ATL".into())
+            .or_insert_with(|| "true".into());
+        if std::env::var_os("XWIN_CACHE_DIR").is_none() {
+            environment
+                .entry("XWIN_CACHE_DIR".into())
+                .or_insert_with(|| {
+                    crate::tools::managed_root()
+                        .join("xwin-atl")
+                        .display()
+                        .to_string()
+                });
+        }
     }
     if backend == "cargo-zigbuild" {
         requirements.push("Zig, cargo-zigbuild and any native target libraries/sysroot required by the application".into());
@@ -235,7 +253,7 @@ fn make_plan(project: &Project, request: &Request) -> Result<Plan> {
         program: backend.into(),
         arguments,
         directory: project.root.clone(),
-        environment: target.env,
+        environment,
         expected_binary: Some(expected_binary),
         output_directory,
         requirements,

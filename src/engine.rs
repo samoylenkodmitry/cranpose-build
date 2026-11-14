@@ -752,6 +752,10 @@ fn write_plist(
         dict.insert("LSRequiresIPhoneOS".into(), true.into());
         for (key, value) in [
             ("MinimumOSVersion", "16.0".into()),
+            // An iPhone with a ProMotion display draws an app at up to 120 Hz
+            // only when its Info.plist has this key. The app draws at most 60
+            // frames a second without it. iPads ignore it.
+            ("CADisableMinimumFrameDurationOnPhone", true.into()),
             (
                 "UILaunchScreen",
                 plist::Value::Dictionary(Default::default()),

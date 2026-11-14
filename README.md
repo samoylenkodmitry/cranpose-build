@@ -146,6 +146,10 @@ resources = ["ios/AppIcon.png"]
 index = "index.html"
 ```
 
+An iOS package's `Info.plist` gets `CADisableMinimumFrameDurationOnPhone` set to
+true unless the app's `ios.plist` sets the key. An iPhone with a ProMotion
+display draws the app at most 60 frames a second without it.
+
 Targets are `mac`, `mac-intel`, `linux`, `linux-arm`, `windows`, `windows-arm`,
 `android`, `ios`, `ios-sim`, `ios-sim-intel` and `web`. OS configuration, such as
 `targets.ios`, also applies to its variants. Desktop builds keep existing default

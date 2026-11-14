@@ -188,6 +188,12 @@ render pipelines its first screen draws with, and builds the module again with
 them embedded (`CRANPOSE_FIRST_SCREEN_PIPELINES`). The page builds those
 pipelines as it starts, so the browser compiles them while the page composes its
 first screen instead of during its first frame.
+The build then writes `pkg/first_screen_glsl.txt`, the exact GLSL of the first
+screen's WebGL stages. The program `cranpose-first-screen-glsl` writes it. The
+build takes that program from the `cranpose-gl-templates` package of the app's
+own web build, so its shaders are the page's. The program builds once into
+`<target-dir>/cranpose-web/glsl-writer`. A page on WebGL fetches the file as it
+loads and compiles each program of its first screen from that GLSL.
 `doctor --platform web` reports whether Chrome was found; `CHROME` names its
 executable. Without Chrome the build keeps the first module, and the page builds
 its first screen's pipelines in its first frame.

@@ -2,11 +2,15 @@
 //! Chrome to record the pipelines its first screen draws with. A release build
 //! embeds that record (`CRANPOSE_FIRST_SCREEN_PIPELINES`), and on WebGL the
 //! page then builds those pipelines as it starts, so the browser compiles them
-//! while the page composes its first screen.
-use crate::{Cancellation, tools};
+//! while the page composes its first screen. Beside its wasm the page then
+//! fetches the exact GLSL of those WebGL stages (`first_screen_glsl.txt`),
+//! which [`GlslWriter`] writes.
+use crate::{Cancellation, process, tools};
 use anyhow::{Context, Result, bail, ensure};
+use cargo_metadata::Metadata;
 use serde_json::{Value, json};
 use std::{
+    collections::BTreeSet,
     fs,
     io::{BufRead, BufReader, ErrorKind, Write},
     net::{TcpListener, TcpStream},
@@ -231,42 +235,140 @@ const VIEWPORTS: [Viewport; 2] = [
 /// How long a page may take to record its first screen.
 const RECORD_TIMEOUT: Duration = Duration::from_secs(60);
 
+/// What a page's first screen drew with, as its recording runs left it.
+#[derive(Debug)]
+pub struct FirstScreen {
+    /// The pipelines of each run, one set after another, as the page's build
+    /// embeds them (`CRANPOSE_FIRST_SCREEN_PIPELINES`).
+    pub pipelines: Vec<u8>,
+    /// The WebGL stages the runs built their pipelines with, a line each.
+    pub stages: BTreeSet<String>,
+}
+
+impl FirstScreen {
+    /// The stages as `cranpose-first-screen-glsl` reads them: a line each, in
+    /// order.
+    pub fn stage_list(&self) -> String {
+        self.stages
+            .iter()
+            .map(|stage| format!("{stage}\n"))
+            .collect()
+    }
+}
+
 /// Opens `page` of the site in `root` in headless Chrome at a phone's and a
 /// desktop's viewport, on WebGL and on the backend the page picks itself,
-/// and returns the first screens it recorded, one set after another, as the
-/// page's build embeds them. A run that records what an earlier one did, as
-/// one on a Chrome without WebGPU does, adds nothing.
+/// and returns the first screens it recorded. A run that records the
+/// pipelines an earlier one did, as one on a Chrome without WebGPU does,
+/// adds no pipelines.
 pub fn record_first_screen(
     root: &Path,
     page: &str,
     cancel: &Cancellation,
     mut log: impl FnMut(&str),
-) -> Result<Vec<u8>> {
+) -> Result<FirstScreen> {
     let chrome =
         find_chrome().context("Chrome or Chromium is missing; set CHROME to its executable")?;
     let site = Site::serve(root)?;
     let own = site.url(page);
     let gl = format!("{own}?backend=gl");
     let mut sets: Vec<Vec<u8>> = Vec::new();
+    let mut stages = BTreeSet::new();
     for viewport in &VIEWPORTS {
         for (url, backend) in [(gl.as_str(), "WebGL"), (own.as_str(), "its own backend")] {
             cancel.check()?;
             let mut browser = Browser::launch(&chrome, viewport)?;
-            let set = browser.record(url, viewport, cancel)?;
+            let (set, listed) = browser.record(url, viewport, cancel)?;
             let recorded = sets.contains(&set);
             log(&format!(
-                "First screen at {}x{} on {backend}: {} bytes of pipeline records{}",
+                "First screen at {}x{} on {backend}: {} bytes of pipeline records{}, {} WebGL stages",
                 viewport.width,
                 viewport.height,
                 set.len(),
-                if recorded { ", recorded already" } else { "" }
+                if recorded { ", recorded already" } else { "" },
+                listed.len()
             ));
             if !recorded {
                 sets.push(set);
             }
+            stages.extend(listed);
         }
     }
-    Ok(sets.concat())
+    Ok(FirstScreen {
+        pipelines: sets.concat(),
+        stages,
+    })
+}
+
+/// The program that writes the exact GLSL of a page's first screen's WebGL
+/// stages: `cranpose-first-screen-glsl` of the `cranpose-gl-templates`
+/// package the app's web build resolves. Its shaders are the page's own, so
+/// the page takes the file it writes.
+#[derive(Debug)]
+pub struct GlslWriter {
+    manifest: PathBuf,
+    offline: bool,
+}
+
+impl GlslWriter {
+    const PACKAGE: &str = "cranpose-gl-templates";
+    const PROGRAM: &str = "cranpose-first-screen-glsl";
+
+    /// The writer of the Cranpose version that `cargo metadata` resolves for
+    /// the app at `manifest` with `cargo_args`, the Cargo arguments of its web
+    /// build. `None` when that version has no writer.
+    pub fn find(
+        manifest: &Path,
+        cargo_args: &[String],
+        cancel: &Cancellation,
+    ) -> Result<Option<Self>> {
+        let mut command = Command::new(tools::tool("cargo")?);
+        command
+            .args(["metadata", "--format-version", "1", "--manifest-path"])
+            .arg(manifest)
+            .args(cargo_args);
+        tools::apply_environment(&mut command)?;
+        let metadata: Metadata = serde_json::from_str(&process::capture(command, cancel)?)?;
+        Ok(metadata
+            .packages
+            .iter()
+            .find(|package| {
+                package.name.as_str() == Self::PACKAGE
+                    && package
+                        .targets
+                        .iter()
+                        .any(|target| target.is_bin() && target.name == Self::PROGRAM)
+            })
+            .map(|package| Self {
+                manifest: package.manifest_path.clone().into_std_path_buf(),
+                offline: cargo_args.iter().any(|arg| arg == "--offline"),
+            }))
+    }
+
+    /// Writes `out` from `stages`, a file of the stages a line each. The
+    /// program builds into `target_dir` with the lock file of its own
+    /// workspace, the one its Cranpose version was released with.
+    pub fn write(
+        &self,
+        stages: &Path,
+        out: &Path,
+        target_dir: &Path,
+        cancel: &Cancellation,
+        log: impl FnMut(&str),
+    ) -> Result<()> {
+        let mut command = Command::new(tools::tool("cargo")?);
+        command
+            .args(["run", "--locked", "--manifest-path"])
+            .arg(&self.manifest)
+            .args(["--bin", Self::PROGRAM, "--target-dir"])
+            .arg(target_dir);
+        if self.offline {
+            command.arg("--offline");
+        }
+        command.arg("--").arg(stages).arg(out);
+        tools::apply_environment(&mut command)?;
+        process::execute(command, Duration::from_secs(1800), cancel, log)
+    }
 }
 
 struct Browser {
@@ -357,7 +459,14 @@ impl Browser {
         Ok(result["result"]["value"].clone())
     }
 
-    fn record(&mut self, url: &str, viewport: &Viewport, cancel: &Cancellation) -> Result<Vec<u8>> {
+    /// The pipelines of the page's first screen and the WebGL stages it built
+    /// them with.
+    fn record(
+        &mut self,
+        url: &str,
+        viewport: &Viewport,
+        cancel: &Cancellation,
+    ) -> Result<(Vec<u8>, Vec<String>)> {
         self.call(
             "Emulation.setDeviceMetricsOverride",
             json!({
@@ -391,7 +500,7 @@ impl Browser {
             thread::sleep(Duration::from_millis(100));
         }
         let bytes = self.evaluate("Array.from(globalThis.__cranposeFirstScreenPipelines)")?;
-        bytes
+        let pipelines = bytes
             .as_array()
             .context("The page's first screen is not a byte array")?
             .iter()
@@ -401,7 +510,17 @@ impl Browser {
                     .and_then(|byte| u8::try_from(byte).ok())
                     .context("The page's first screen holds a value that is not a byte")
             })
-            .collect()
+            .collect::<Result<_>>()?;
+        // A page records its stages where it drew on WebGL.
+        let listed = self.evaluate("globalThis.__cranposeFirstScreenStages ?? ''")?;
+        let stages = listed
+            .as_str()
+            .context("The page's first screen stages are not text")?
+            .lines()
+            .filter(|line| !line.is_empty())
+            .map(str::to_owned)
+            .collect();
+        Ok((pipelines, stages))
     }
 }
 

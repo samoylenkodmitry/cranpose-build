@@ -351,6 +351,10 @@ fn write_site(project: &Project, pkg: &Path, site: &Path) -> Result<()> {
     Ok(())
 }
 
+/// The file of the exact GLSL of the first screen's WebGL stages, which a
+/// page with first-screen records fetches beside its wasm.
+const FIRST_SCREEN_GLSL: &str = "first_screen_glsl.txt";
+
 /// Records the first screen of the page the first build made and builds the
 /// module again with it embedded. A recording that fails leaves the first
 /// build: the page then builds its first screen's pipelines in its first
@@ -377,10 +381,10 @@ fn embed_first_screen(
         .context("Web page name")?
         .to_string_lossy()
         .into_owned();
-    let records = match crate::web::record_first_screen(site.path(), &page, cancel, |text| {
+    let first_screen = match crate::web::record_first_screen(site.path(), &page, cancel, |text| {
         emit(Event::Log { text: text.into() })
     }) {
-        Ok(records) => records,
+        Ok(first_screen) => first_screen,
         Err(error) => {
             cancel.check()?;
             emit(Event::Log {
@@ -391,11 +395,9 @@ fn embed_first_screen(
             return Ok(());
         }
     };
-    let file = pkg
-        .parent()
-        .context("pkg directory")?
-        .join("first_screen_pipelines.bin");
-    fs::write(&file, records)?;
+    let records = pkg.parent().context("pkg directory")?;
+    let file = records.join("first_screen_pipelines.bin");
+    fs::write(&file, &first_screen.pipelines)?;
     emit(Event::Stage {
         message: "Building web with the first screen's pipelines".into(),
     });
@@ -409,7 +411,56 @@ fn embed_first_screen(
     process::execute(command, Duration::from_secs(7200), cancel, |text| {
         emit(Event::Log { text: text.into() })
     })?;
+    if first_screen.stages.is_empty() {
+        return Ok(());
+    }
+    let stages = records.join("first_screen_stages.txt");
+    fs::write(&stages, first_screen.stage_list())?;
+    emit(Event::Stage {
+        message: "Writing the GLSL of the first screen's WebGL stages".into(),
+    });
+    if let Err(error) = write_first_screen_glsl(project, plan, &stages, cancel, emit) {
+        cancel.check()?;
+        emit(Event::Log {
+            text: format!(
+                "The first screen's GLSL was not written ({error:#}); on WebGL the page builds those stages from its templates."
+            ),
+        });
+    }
     Ok(())
+}
+
+/// Writes `pkg/first_screen_glsl.txt` from the stage list `stages` with the
+/// writer of the app's Cranpose version, which builds into the target
+/// directory's `cranpose-web/glsl-writer`.
+fn write_first_screen_glsl(
+    project: &Project,
+    plan: &Plan,
+    stages: &Path,
+    cancel: &Cancellation,
+    emit: &mut impl FnMut(Event),
+) -> Result<()> {
+    let pkg = plan.expected_binary.as_ref().context("Expected pkg")?;
+    let cargo_args = plan
+        .arguments
+        .iter()
+        .skip_while(|argument| *argument != "--")
+        .skip(1)
+        .cloned()
+        .collect::<Vec<_>>();
+    let writer = crate::web::GlslWriter::find(
+        project.package.manifest_path.as_std_path(),
+        &cargo_args,
+        cancel,
+    )?
+    .context("The app's Cranpose has no cranpose-first-screen-glsl")?;
+    writer.write(
+        stages,
+        &pkg.join(FIRST_SCREEN_GLSL),
+        &project.target_dir.join("cranpose-web").join("glsl-writer"),
+        cancel,
+        |text| emit(Event::Log { text: text.into() }),
+    )
 }
 
 pub fn build(
@@ -423,6 +474,16 @@ pub fn build(
     });
     let project = Project::load(request, cancel)?;
     let plan = make_plan(&project, request)?;
+    if request.platform == Platform::Web {
+        // The GLSL of an earlier build's first screen does not belong to this
+        // build.
+        let pkg = plan.expected_binary.as_ref().context("Expected pkg")?;
+        if let Err(error) = fs::remove_file(pkg.join(FIRST_SCREEN_GLSL))
+            && error.kind() != std::io::ErrorKind::NotFound
+        {
+            return Err(error.into());
+        }
+    }
     let mut command = Command::new(tools::tool(&plan.program)?);
     command
         .args(&plan.arguments)
@@ -691,6 +752,10 @@ fn write_plist(
         dict.insert("LSRequiresIPhoneOS".into(), true.into());
         for (key, value) in [
             ("MinimumOSVersion", "16.0".into()),
+            // An iPhone with a ProMotion display draws an app at up to 120 Hz
+            // only when its Info.plist has this key. The app draws at most 60
+            // frames a second without it. iPads ignore it.
+            ("CADisableMinimumFrameDurationOnPhone", true.into()),
             (
                 "UILaunchScreen",
                 plist::Value::Dictionary(Default::default()),
